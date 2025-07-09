@@ -1,8 +1,14 @@
 {
-  "version": 2,
-  "functions": {
-    "index.py": {
-      "maxDuration": 60
+  "builds": [
+    {
+      "src": "index.py", 
+      "use": "@vercel/python"
     }
-  }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "destination": "index.py" 
+    }
+  ]
 }
