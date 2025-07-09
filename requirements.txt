@@ -1,22 +1,22 @@
 # Core FastAPI and server dependencies
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
+fastapi
+uvicorn
 
 # Data validation
-pydantic==2.5.0
+pydantic
 
 # Environment variables
-python-dotenv==1.0.0
+python-dotenv
 
 # Async HTTP requests
-aiohttp==3.9.1
+aiohttp
 
 # Core LangGraph and LangChain dependencies
-langgraph==0.4.7
-langchain==0.3.25
-langchain-core==0.3.64
-langchain-google-genai==0.1.11
+langgraph
+langchain
+langchain-core
+langchain-google-genai
 
 # Additional required dependencies
-requests==2.31.0
-typing-extensions>=4.5.0 
+requests
+typing-extensions

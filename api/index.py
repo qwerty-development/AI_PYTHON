@@ -14,7 +14,7 @@ import os
 import platform
 from datetime import datetime
 
-from ai_agent import compare_cars_costs, run_car_agent
+from .ai_agent import compare_cars_costs, run_car_agent
 
 # ====================================================================
 # FASTAPI APP SETUP
