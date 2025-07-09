@@ -186,8 +186,8 @@ def start_server(host: str = "0.0.0.0", port: int = 8000, debug: bool = True):
 # VERCEL DEPLOYMENT HANDLER
 # ====================================================================
 
-# Export the FastAPI app for Vercel
-handler = app
+# Export the FastAPI app for Vercel (ASGI)
+# Vercel automatically detects the `app` variable for ASGI/WGSI frameworks.
 
 # Add a simple test endpoint for debugging
 @app.get("/test")
