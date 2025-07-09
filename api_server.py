@@ -180,6 +180,26 @@ def start_server(host: str = "0.0.0.0", port: int = 8000, debug: bool = True):
     )
 
 # ====================================================================
+# VERCEL DEPLOYMENT HANDLER
+# ====================================================================
+
+# Export the FastAPI app for Vercel
+handler = app
+
+# Add a simple test endpoint for debugging
+@app.get("/test")
+async def test_endpoint():
+    """Simple test endpoint for Vercel deployment debugging"""
+    import platform
+    return {
+        "message": "API is working on Vercel!",
+        "timestamp": datetime.now().isoformat(),
+        "python_version": platform.python_version(),
+        "has_api_key": bool(os.getenv("GEMINI_API_KEY")),
+        "environment": "vercel"
+    }
+
+# ====================================================================
 # REACT NATIVE INTEGRATION EXAMPLES
 # ====================================================================
 
@@ -189,7 +209,7 @@ REACT NATIVE INTEGRATION EXAMPLE:
 // In your React Native app:
 const compareCarsCosts = async (car1, car2) => {
   try {
-    const response = await fetch('http://your-api-domain:8000/compare', {
+    const response = await fetch('https://your-vercel-app.vercel.app/compare', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -217,6 +237,7 @@ const compareCarsCosts = async (car1, car2) => {
 const comparisonData = await compareCarsCosts("2018 BMW X5", "2020 Mercedes G500");
 """
 
+# For local development only
 if __name__ == "__main__":
-    # Run the server directly
-    start_server() 
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000) 
