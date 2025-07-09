@@ -1,10 +1,23 @@
 {
+  "version": 2,
+  "builds": [
+    {
+      "src": "index.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/index.py"
+    }
+  ],
   "functions": {
-    "api_server.py": {
-      "runtime": "@vercel/python"
+    "index.py": {
+      "maxDuration": 60
     }
   },
   "env": {
-    "GEMINI_API_KEY": "@GEMINI_API_KEY"
+    "GEMINI_API_KEY": "@gemini_api_key"
   }
 }

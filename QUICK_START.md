@@ -28,10 +28,10 @@ python test_agent.py
 python ai_agent.py
 
 # Start REST API server
-python api_server.py
+python index.py
 ```
 
-## 📡 API Endpoints (when running api_server.py)
+## 📡 API Endpoints (when running index.py)
 
 - **Health Check**: `GET http://localhost:8000/health`
 - **Compare Cars**: `POST http://localhost:8000/compare`

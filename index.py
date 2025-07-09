@@ -10,6 +10,9 @@ from pydantic import BaseModel
 from typing import Dict, Any
 import asyncio
 import uvicorn
+import os
+import platform
+from datetime import datetime
 
 from ai_agent import compare_cars_costs, run_car_agent
 
@@ -172,7 +175,7 @@ def start_server(host: str = "0.0.0.0", port: int = 8000, debug: bool = True):
     print(f"🔍 Health Check: http://{host}:{port}/health")
     
     uvicorn.run(
-        "api_server:app",
+        "index:app",
         host=host,
         port=port,
         reload=debug,
@@ -190,7 +193,6 @@ handler = app
 @app.get("/test")
 async def test_endpoint():
     """Simple test endpoint for Vercel deployment debugging"""
-    import platform
     return {
         "message": "API is working on Vercel!",
         "timestamp": datetime.now().isoformat(),
