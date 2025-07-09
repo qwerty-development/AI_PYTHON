@@ -1,11 +1,10 @@
 {
   "functions": {
     "api_server.py": {
-      "runtime": "python3.9",
-      "maxDuration": 60
+      "runtime": "@vercel/python"
     }
   },
   "env": {
-    "GEMINI_API_KEY": "AIzaSyASVqSrq2zXKrl-dsMfuU9RxY49J0_JQk8"
+    "GEMINI_API_KEY": "@GEMINI_API_KEY"
   }
 }
