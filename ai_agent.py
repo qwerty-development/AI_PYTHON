@@ -5,7 +5,7 @@ AI CAR COMPARISON AGENT - Improved Version
 ====================================================================
 This agent compares two cars by iteratively searching for specific
 information using a focused web search tool. The AI determines what
-to search for and formats the final JSON response.
+to search for and formats the final JSON response. hello world
 ====================================================================
 """
 
