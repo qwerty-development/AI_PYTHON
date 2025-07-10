@@ -17,6 +17,7 @@ import time
 from datetime import datetime
 from typing import Dict, Any, List
 from urllib.parse import quote_plus
+from supabase import create_client, Client
 
 # LangGraph and LangChain imports
 from langgraph.prebuilt import create_react_agent

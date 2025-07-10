@@ -20,3 +20,4 @@ langchain-google-genai
 # Additional required dependencies
 requests
 typing-extensions
+supabase

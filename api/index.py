@@ -15,6 +15,7 @@ import platform
 from datetime import datetime
 
 from .ai_agent import compare_cars_costs, run_car_agent
+from .ai_agent_chatbot import chat_with_bot
 
 # ====================================================================
 # FASTAPI APP SETUP
@@ -50,6 +51,17 @@ class CarComparisonRequest(BaseModel):
             }
         }
 
+class ChatRequest(BaseModel):
+    """Request model for AI chatbot"""
+    message: str
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "message": "I'm looking for a BMW under $30,000"
+            }
+        }
+
 class ApiResponse(BaseModel):
     """Standard API response wrapper"""
     success: bool
@@ -65,10 +77,11 @@ class ApiResponse(BaseModel):
 async def root():
     """Health check endpoint"""
     return {
-        "message": "AI Car Comparison API is running!",
+        "message": "AI Car Comparison & Chatbot API is running!",
         "version": "1.0.0",
         "endpoints": {
             "compare": "/compare",
+            "chat": "/chat",
             "health": "/health",
             "docs": "/docs"
         }
@@ -142,6 +155,61 @@ async def compare_cars_get(car1: str, car2: str):
     return await compare_cars(request)
 
 # ====================================================================
+# AI CHATBOT ENDPOINT
+# ====================================================================
+
+@app.post("/chat", response_model=ApiResponse)
+async def chat_with_ai(request: ChatRequest):
+    """
+    Chat with the AI car assistant
+    
+    Args:
+        request: ChatRequest with user message
+        
+    Returns:
+        ApiResponse with AI response containing message and car_ids
+    """
+    try:
+        # Validate input
+        if not request.message.strip():
+            raise HTTPException(
+                status_code=400, 
+                detail="Message cannot be empty"
+            )
+        
+        # Get response from AI chatbot
+        ai_response = chat_with_bot(request.message.strip())
+        
+        # Try to parse the AI response as JSON (since it should return structured data)
+        try:
+            import json
+            parsed_response = json.loads(ai_response)
+            
+            return ApiResponse(
+                success=True,
+                data=parsed_response,
+                message="AI response generated successfully"
+            )
+            
+        except json.JSONDecodeError:
+            # If response is not JSON, return as plain text
+            return ApiResponse(
+                success=True,
+                data={"message": ai_response, "car_ids": []},
+                message="AI response generated successfully"
+            )
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        # Handle unexpected errors
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+# ====================================================================
 # EXAMPLE ENDPOINTS FOR TESTING
 # ====================================================================
 
@@ -164,15 +232,23 @@ async def compare_example_cars():
         CarComparisonRequest(car1="2018 BMW X5", car2="2020 Mercedes-Benz G500")
     )
 
+@app.post("/chat/example")
+async def chat_example():
+    """Test the chatbot with an example message"""
+    return await chat_with_ai(
+        ChatRequest(message="I'm looking for a BMW under $50,000")
+    )
+
 # ====================================================================
 # SERVER STARTUP
 # ====================================================================
 
 def start_server(host: str = "0.0.0.0", port: int = 8000, debug: bool = True):
     """Start the FastAPI server"""
-    print(f"🚀 Starting AI Car Comparison API on {host}:{port}")
+    print(f"🚀 Starting AI Car Comparison & Chatbot API on {host}:{port}")
     print(f"📖 API Documentation: http://{host}:{port}/docs")
     print(f"🔍 Health Check: http://{host}:{port}/health")
+    print(f"💬 Chat Example: http://{host}:{port}/chat/example")
     
     uvicorn.run(
         "index:app",
@@ -209,6 +285,8 @@ async def test_endpoint():
 REACT NATIVE INTEGRATION EXAMPLE:
 
 // In your React Native app:
+
+// 1. CAR COMPARISON API
 const compareCarsCosts = async (car1, car2) => {
   try {
     const response = await fetch('https://your-vercel-app.vercel.app/compare', {
@@ -235,8 +313,35 @@ const compareCarsCosts = async (car1, car2) => {
   }
 };
 
-// Usage:
+// 2. AI CHATBOT API
+const chatWithAI = async (message) => {
+  try {
+    const response = await fetch('https://your-vercel-app.vercel.app/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        message: message
+      })
+    });
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      return result.data; // Contains: { message: "AI response", car_ids: [1, 2, 3] }
+    } else {
+      throw new Error(result.error);
+    }
+  } catch (error) {
+    console.error('Chat failed:', error);
+    throw error;
+  }
+};
+
+// Usage Examples:
 const comparisonData = await compareCarsCosts("2018 BMW X5", "2020 Mercedes G500");
+const chatResponse = await chatWithAI("I'm looking for a BMW under $50,000");
 """
 
 # For local development only
