@@ -46,7 +46,7 @@ def get_cars_data_eq(
     
     Args:
         select_fields: Comma-separated list of fields to select (default: "*" for all)
-        make: Car make/brand (e.g., "Toyota", "BMW")
+        make: Car make/brand (e.g., Alfa Romeo, Aston Martin, Audi, Bentley, BMW, BYD, Ferrari, GMC, Jaguar, Jeep, Jetour, Kia, Land Rover, Lotus, Maserati, Maybach, MAZDA, Mercedes-Benz, MINI, Mitsubishi, Nissan, Porsche, Rolls-Royce, smart, Subaru, Toyota, Volkswagen, Voyah)
         model: Car model (e.g., "Camry", "X5")
         year_min: Minimum year (e.g., 2015)
         year_max: Maximum year (e.g., 2024)
@@ -272,6 +272,7 @@ IMPORTANT CONSTRAINTS:
 - If no cars match, return empty car_ids array and suggest alternatives in message
 - Keep responses focused on helping users find their perfect vehicle
 - Apply logical filters based on user preferences (budget, vehicle type, features, condition, etc.)
+when the first query on the database don't give a result try please to do another query
 """
 
 # Initialize the model
