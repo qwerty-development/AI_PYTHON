@@ -14,8 +14,16 @@ import os
 import platform
 from datetime import datetime
 
-from .ai_agent import compare_cars_costs, run_car_agent
-from .ai_agent_chatbot import chat_with_bot
+# Flexible imports to allow running as a module (python -m api.index)
+# or as a script from inside the `api` folder (python index.py)
+try:
+    # When `api` is a package (e.g., run with `python -m api.index` or uvicorn from project root)
+    from .ai_agent import compare_cars_costs, run_car_agent
+    from .ai_agent_chatbot import chat_with_bot
+except ImportError:  # pragma: no cover
+    # Fallback for running directly inside the api folder
+    from ai_agent import compare_cars_costs, run_car_agent
+    from ai_agent_chatbot import chat_with_bot
 
 # ====================================================================
 # FASTAPI APP SETUP
