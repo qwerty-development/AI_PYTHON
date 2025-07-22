@@ -1367,10 +1367,17 @@ def validate_and_fix_response(response_content: str) -> str:
             "car_ids": []
         })
 
-def chat_with_bot(user_input: str) -> str:
+def chat_with_bot(user_input: str, conversation_history: list = None) -> str:
     """
-    Function to chat with the bot. Each request is stateless.
-    Frontend handles conversation history management.
+    Function to chat with the bot. Supports conversation history for context.
+    
+    Args:
+        user_input: Current user message
+        conversation_history: Optional list of previous messages in format:
+                            [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
+    
+    Returns:
+        JSON string with AI response
     """
     import time
     
@@ -1379,10 +1386,35 @@ def chat_with_bot(user_input: str) -> str:
     
     for attempt in range(max_retries):
         try:
-            # Create a fresh state for each request
-            current_input = {"messages": [HumanMessage(content=user_input)]}
+            # Build message history
+            messages = []
             
-            # Run the agent with just the current message
+            # Add conversation history if provided
+            if conversation_history:
+                for msg in conversation_history:
+                    if msg.get("role") == "user":
+                        messages.append(HumanMessage(content=msg.get("content", "")))
+                    elif msg.get("role") == "assistant":
+                        # Parse assistant message to extract just the text content
+                        assistant_content = msg.get("content", "")
+                        try:
+                            # If it's JSON, extract the message field
+                            import json
+                            parsed = json.loads(assistant_content)
+                            if isinstance(parsed, dict) and "message" in parsed:
+                                assistant_content = parsed["message"]
+                        except:
+                            # If not JSON, use as-is
+                            pass
+                        messages.append(AIMessage(content=assistant_content))
+            
+            # Add current user message
+            messages.append(HumanMessage(content=user_input))
+            
+            # Create state with message history
+            current_input = {"messages": messages}
+            
+            # Run the agent
             result = app.invoke(current_input)
             
             # Extract the last AI message

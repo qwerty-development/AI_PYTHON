@@ -62,11 +62,16 @@ class CarComparisonRequest(BaseModel):
 class ChatRequest(BaseModel):
     """Request model for AI chatbot"""
     message: str
+    conversation_history: list = None  # Optional conversation history
     
     class Config:
         json_schema_extra = {
             "example": {
-                "message": "I'm looking for a BMW under $30,000"
+                "message": "I'm looking for a BMW under $30,000",
+                "conversation_history": [
+                    {"role": "user", "content": "What are the cars available"},
+                    {"role": "assistant", "content": "Found 160 cars..."}
+                ]
             }
         }
 
@@ -172,7 +177,7 @@ async def chat_with_ai(request: ChatRequest):
     Chat with the AI car assistant
     
     Args:
-        request: ChatRequest with user message
+        request: ChatRequest with user message and optional conversation history
         
     Returns:
         ApiResponse with AI response containing message and car_ids
@@ -185,8 +190,11 @@ async def chat_with_ai(request: ChatRequest):
                 detail="Message cannot be empty"
             )
         
-        # Get response from AI chatbot
-        ai_response = chat_with_bot(request.message.strip())
+        # Get response from AI chatbot with conversation history
+        ai_response = chat_with_bot(
+            request.message.strip(), 
+            conversation_history=request.conversation_history
+        )
         
         # Try to parse the AI response as JSON (since it should return structured data)
         try:
