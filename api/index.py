@@ -62,16 +62,16 @@ class CarComparisonRequest(BaseModel):
 class ChatRequest(BaseModel):
     """Request model for AI chatbot"""
     message: str
-    # conversation_history: list = None  # Optional conversation history
+    conversation_history: list = None  # Optional conversation history
     
     class Config:
         json_schema_extra = {
             "example": {
                 "message": "I'm looking for a BMW under $30,000",
-                # "conversation_history": [
-                #     {"role": "user", "content": "What are the cars available"},
-                #     {"role": "assistant", "content": "Found 160 cars..."}
-                # ]
+                "conversation_history": [
+                    {"role": "user", "content": "What are the cars available"},
+                    {"role": "assistant", "content": "Found 160 cars..."}
+                ]
             }
         }
 
@@ -190,10 +190,9 @@ async def chat_with_ai(request: ChatRequest):
                 detail="Message cannot be empty"
             )
         
-        # Get response from AI chatbot with conversation history
+        # Get response from AI chatbot (ignore conversation_history)
         ai_response = chat_with_bot(
-            request.message.strip(), 
-            conversation_history=request.conversation_history
+            request.message.strip()
         )
         
         # Try to parse the AI response as JSON (since it should return structured data)
