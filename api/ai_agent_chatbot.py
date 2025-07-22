@@ -553,13 +553,16 @@ def get_cars_by_features(
         if make:
             query = query.ilike("make", f"%{make}%")
         
-        # Apply feature filters - improved logic
+        # Apply feature filters - simplified approach to avoid PostgreSQL array operator issues
         required_list = [f.strip().lower() for f in required_features.split(",") if f.strip()]
         
-        # For each required feature, add a filter
-        for feature in required_list:
-            if feature:
-                query = query.ilike("features", f"%{feature}%")
+        # Simple text search in features column (avoiding array operators entirely)
+        if required_list:
+            # Use simple contains search - much safer
+            for feature in required_list:
+                if feature:
+                    # Simple text containment search
+                    query = query.filter("features", "cs", f'["{feature}"]')
         
         # Order by price
         query = query.order("price", desc=False)
@@ -629,7 +632,8 @@ def get_recently_added_cars(
         date_str = date_threshold.strftime('%Y-%m-%d')
         
         query = supabase.table("cars").select("*").eq("status", "available")
-        query = query.gte("created_at", date_str)
+        # Use listed_at instead of created_at (based on database schema)
+        query = query.gte("listed_at", date_str)
         
         if category:
             query = query.eq("category", category)
@@ -640,8 +644,8 @@ def get_recently_added_cars(
         if make:
             query = query.ilike("make", f"%{make}%")
         
-        # Order by creation date (newest first)
-        query = query.order("created_at", desc=True)
+        # Order by listing date (newest first)
+        query = query.order("listed_at", desc=True)
         
         # Execute without limit - get ALL results
         result = query.execute()
@@ -781,12 +785,12 @@ def search_cars_advanced(
                 elif key == "color":
                     query = query.ilike("color", f"%{value}%")
                 elif key == "features":
-                    # Support multiple features
+                    # Support multiple features with simple contains search
                     if isinstance(value, list):
                         for feature in value:
-                            query = query.ilike("features", f"%{feature}%")
+                            query = query.filter("features", "cs", f'["{feature}"]')
                     else:
-                        query = query.ilike("features", f"%{value}%")
+                        query = query.filter("features", "cs", f'["{value}"]')
         
         # Apply enhanced text search if provided
         if search_term:
@@ -883,19 +887,31 @@ def search_web_for_car_info(
             # Fallback: provide common car category mappings (using correct database categories)
             car_type_mappings = {
                 "family car": ["SUV", "Sedan"],
-                "sport": ["Sports"],  # More specific - just Sports category
-                "sports car": ["Sports"],  # More specific
-                "sport car": ["Sports"],  # More specific
+                "family of 5": ["SUV"],  # 5+ people need larger vehicles
+                "large family": ["SUV"],  # Large families need SUVs
+                "big family": ["SUV"],
+                "7 seater": ["SUV"],
+                "8 seater": ["SUV"],
+                "college student": ["Hatchback", "Sedan"],  # Budget-friendly, efficient
+                "student": ["Hatchback", "Sedan"],
+                "first car": ["Hatchback", "Sedan"],  # Safe, affordable
+                "new driver": ["Sedan", "Hatchback"],  # Safe, easy to handle
+                "commute": ["Sedan", "Hatchback"],  # Fuel efficient
+                "long commute": ["Sedan", "Hatchback"],
+                "city driving": ["Hatchback", "Sedan"],  # Compact, maneuverable
+                "weekend": ["Convertible", "Sports"],  # Fun driving
+                "business": ["Sedan"],  # Professional appearance
+                "elderly": ["Sedan", "SUV"],  # Easy entry/exit
+                "mobility": ["SUV", "Sedan"],  # Higher seating, easier access
+                "sport": ["Sports"],
+                "sports car": ["Sports"],
+                "sport car": ["Sports"],
                 "sporty": ["Sports"],
                 "performance": ["Sports"],
                 "fast car": ["Sports"],
                 "luxury car": ["Sedan"],
                 "fuel efficient": ["Sedan", "Hatchback"],
                 "off road": ["SUV"],
-                "city car": ["Hatchback", "Sedan"],
-                "weekend car": ["Convertible"],
-                "work car": ["Sedan"],
-                "first car": ["Sedan", "Hatchback"],
                 "reliable car": ["Sedan", "SUV"],
                 "economical car": ["Hatchback", "Sedan"],
                 "safe car": ["SUV", "Sedan"],
@@ -1086,17 +1102,22 @@ Use get_cars_data_eq directly when you can easily map the request to database ca
 - "I want a sedan" → Direct search: category="Sedan"
 - "Convertible cars" → Direct search: category="Convertible"
 
-**WEB SEARCH + DATABASE** (use for complex/unclear requests):
-Only use search_web_for_car_info when the request is ambiguous or complex:
-- "Best car for a college student" → Web search to understand requirements → Database search
-- "What's good for weekend driving?" → Web search for clarification → Database search  
-- "I need something reliable for my business" → Web search for business car types → Database search
-- "Car for elderly person with mobility issues" → Web search for specific needs → Database search
+**WEB SEARCH + DATABASE** (use for specific requirements/complex requests):
+Use search_web_for_car_info when the request has specific requirements or context that needs research:
+- "Best cars for a family of {number}" → Web search for {number}-person family requirements → Database search
+- "Best car for a college student" → Web search to understand student needs → Database search
+- "What's good for weekend driving?" → Web search for weekend car characteristics → Database search  
+- "I need something reliable for my business" → Web search for business car requirements → Database search
+- "Car for elderly person with mobility issues" → Web search for mobility-friendly features → Database search
+- "Best car for long commutes" → Web search for commuter car features → Database search
+- "Safe car for new driver" → Web search for new driver safety features → Database search
+- "Fuel efficient car for city driving" → Web search for city driving requirements → Database search
 
 **DECISION MAKING GUIDE:**
-1. **Can you directly map to database fields?** → Use get_cars_data_eq directly
-2. **Is the request ambiguous or complex?** → Use search_web_for_car_info first, then database
-3. **Specific car/brand query?** → Always use database directly
+1. **Simple category request?** ("family cars", "sports cars", "SUVs") → Use get_cars_data_eq directly
+2. **Specific requirements/context?** ("best for family of 5", "good for college student") → Use search_web_for_car_info first, then database
+3. **Brand/model/price query?** ("BMW under $30k", "Toyota Camry") → Always use database directly
+4. **Ask yourself: Does this need research to understand requirements?** → If yes, use web search first
 
 **COMMON MAPPINGS** (use these for direct database searches):
 - Family car → SUV, Sedan
@@ -1140,12 +1161,12 @@ RESPONSE FORMAT INSTRUCTIONS - MANDATORY CONSISTENCY:
 You MUST format ALL responses as valid JSON with exactly 2 fields and consistent structure:
 
 {
-  "message": "Brief explanation with total matches found. List top 3-5 cars in this exact format: 1. Make Model Year - $Price (ID: ###) - key details",
+  "message": "Brief explanation with total matches found. List cars in this exact format: 1. Make Model Year - $Price (ID: ###) - key details",
   "car_ids": [123, 456, 789]
 }
 
 MANDATORY FORMAT RULES:
-1. ALWAYS valid JSON - no extra text before/after
+1. ALWAYS valid JSON - no extra text before/after, NO markdown code blocks (```json)
 2. car_ids must be array of numbers (not strings)
 3. message must use this exact car listing format:
    "1. Toyota Camry 2020 - $25,000 (ID: 123) - Used, 45k miles, excellent condition
@@ -1156,6 +1177,13 @@ MANDATORY FORMAT RULES:
 5. NO markdown formatting (**, *, etc.) - use plain text only
 6. Keep each car description to one line
 7. Always include ID in parentheses for easy identification
+
+RESULT COUNT GUIDELINES:
+- **message field**: Always show details for top 5 cars only (for readability)
+- **car_ids field**: Include ALL matching car IDs (for frontend to display complete results)
+- Format: "Found 122 cars. Here are the top 5:" but car_ids contains all 122 IDs
+- Small results (≤10 cars): Show all car details AND return all IDs
+- This gives frontend complete data while keeping response readable
 
 SEARCH STRATEGY:
 - **For general/conceptual queries**: Start with web search to understand car types, then search database
@@ -1193,6 +1221,9 @@ IMPORTANT CONSTRAINTS:
 - Use feature-based search for specific requirements
 - Recommend popular or recently added cars when appropriate
 - ALWAYS mention total_matching count when available in search results
+- **CRITICAL**: car_ids array must contain ALL matching car IDs from database, not just the ones shown in message
+- Message shows top 5 car details, but car_ids contains ALL IDs for frontend display
+- Example: "Found 122 cars. Here are the top 5:" with car_ids containing all 122 ID numbers
 
 CRITICAL: EVERY response must be valid JSON with consistent formatting. NO exceptions.
 """
@@ -1275,8 +1306,21 @@ def validate_and_fix_response(response_content: str) -> str:
     Validate and fix the AI response to ensure consistent JSON format.
     """
     try:
+        # Clean up markdown formatting if present
+        cleaned_content = response_content.strip()
+        
+        # Remove markdown code blocks if they exist
+        if cleaned_content.startswith('```json'):
+            cleaned_content = cleaned_content[7:]  # Remove ```json
+        if cleaned_content.startswith('```'):
+            cleaned_content = cleaned_content[3:]   # Remove ```
+        if cleaned_content.endswith('```'):
+            cleaned_content = cleaned_content[:-3]  # Remove trailing ```
+        
+        cleaned_content = cleaned_content.strip()
+        
         # Try to parse as JSON
-        data = json.loads(response_content)
+        data = json.loads(cleaned_content)
         
         # Validate required fields
         if not isinstance(data, dict) or "message" not in data or "car_ids" not in data:
@@ -1399,17 +1443,23 @@ def fallback_car_search(user_input: str) -> str:
         result_data = json.loads(result)
         
         if result_data.get("success") and result_data.get("data"):
-            cars = result_data["data"][:3]  # Get top 3 results
+            all_cars = result_data["data"]  # Get all results
+            cars_to_show = all_cars[:5]  # Show details for top 5 only
             total_count = result_data.get("total_count", 0)
             
             response = {
-                "message": f"Found {total_count} cars that might interest you. Here are the top options:",
+                "message": f"Found {total_count} cars that might interest you. Here are the top {len(cars_to_show)}:",
                 "car_ids": []
             }
             
-            # Format cars consistently
+            # Add ALL car IDs to the array (for frontend)
+            for car in all_cars:
+                if car.get("id"):
+                    response["car_ids"].append(car.get("id"))
+            
+            # Format top cars for display in message
             car_list = []
-            for i, car in enumerate(cars, 1):
+            for i, car in enumerate(cars_to_show, 1):
                 price = car.get('price', 'N/A')
                 if isinstance(price, (int, float)):
                     price_str = f"${price:,.0f}"
@@ -1418,7 +1468,6 @@ def fallback_car_search(user_input: str) -> str:
                 
                 car_line = f"{i}. {car.get('make', 'Unknown')} {car.get('model', 'Unknown')} {car.get('year', 'N/A')} - {price_str} (ID: {car.get('id', 'N/A')}) - {car.get('condition', 'Used')}"
                 car_list.append(car_line)
-                response["car_ids"].append(car.get("id"))
             
             response["message"] += " " + " ".join(car_list)
             response["message"] += " Note: I'm currently experiencing some technical issues, so this is a simplified search. Please try again later for more detailed assistance."
