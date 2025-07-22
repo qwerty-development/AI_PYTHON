@@ -880,36 +880,45 @@ def search_web_for_car_info(
         
         # If no results from DuckDuckGo, try a simple web search approach
         if not results:
-            # Fallback: provide common car category mappings
+            # Fallback: provide common car category mappings (using correct database categories)
             car_type_mappings = {
-                "family car": ["suv", "sedan", "minivan", "crossover"],
-                "sports car": ["coupe", "convertible", "sports"],
-                "luxury car": ["sedan", "coupe", "suv"],
-                "fuel efficient": ["sedan", "hatchback", "hybrid"],
-                "off road": ["suv", "truck", "4wd"],
-                "city car": ["hatchback", "sedan", "compact"],
-                "weekend car": ["convertible", "sports", "coupe"],
-                "work car": ["sedan", "hatchback"],
-                "first car": ["sedan", "hatchback"],
-                "reliable car": ["sedan", "suv"],
-                "economical car": ["hatchback", "sedan"],
-                "safe car": ["suv", "sedan"],
-                "spacious car": ["suv", "minivan", "wagon"]
+                "family car": ["SUV", "Sedan"],
+                "sport": ["Sports"],  # More specific - just Sports category
+                "sports car": ["Sports"],  # More specific
+                "sport car": ["Sports"],  # More specific
+                "sporty": ["Sports"],
+                "performance": ["Sports"],
+                "fast car": ["Sports"],
+                "luxury car": ["Sedan"],
+                "fuel efficient": ["Sedan", "Hatchback"],
+                "off road": ["SUV"],
+                "city car": ["Hatchback", "Sedan"],
+                "weekend car": ["Convertible"],
+                "work car": ["Sedan"],
+                "first car": ["Sedan", "Hatchback"],
+                "reliable car": ["Sedan", "SUV"],
+                "economical car": ["Hatchback", "Sedan"],
+                "safe car": ["SUV", "Sedan"],
+                "spacious car": ["SUV"]
             }
             
-            # Check if query matches any known patterns
+            # Check if query matches any known patterns (more flexible matching)
             query_lower = query.lower()
             suggested_categories = []
             
             for car_type, categories in car_type_mappings.items():
-                if car_type in query_lower:
+                # More flexible matching - check if any words from car_type are in query
+                car_type_words = car_type.split()
+                if any(word in query_lower for word in car_type_words):
                     suggested_categories.extend(categories)
             
+            # Remove duplicates and ensure we have some categories
             if suggested_categories:
+                unique_categories = list(set(suggested_categories))
                 results.append({
                     "type": "category_suggestion",
-                    "content": f"Based on your search for '{query}', I recommend looking at these vehicle categories: {', '.join(set(suggested_categories))}",
-                    "categories": list(set(suggested_categories))
+                    "content": f"Based on your search for '{query}', I recommend looking at these vehicle categories: {', '.join(unique_categories)}",
+                    "categories": unique_categories
                 })
         
         # Extract car categories and types from the results
@@ -920,7 +929,12 @@ def search_web_for_car_info(
             "price_insights": []
         }
         
-        # Analyze results for car-related keywords
+        # First check if we have direct category suggestions from fallback
+        for result in results:
+            if result.get("type") == "category_suggestion" and result.get("categories"):
+                extracted_insights["suggested_categories"].extend(result["categories"])
+        
+        # Also analyze text content for car-related keywords
         all_text = " ".join([r.get("content", "") for r in results]).lower()
         
         # Map common car categories to database categories (exact match with database)
@@ -931,10 +945,15 @@ def search_web_for_car_info(
             "coupe": "Coupe",
             "convertible": "Convertible",
             "sports": "Sports",
+            "sport": "Sports",  # Map both sport and sports to Sports
+            "sporty": "Sports",  # Also map sporty
+            "performance": "Sports",  # Map performance cars
+            "fast": "Sports",  # Map fast cars
             "minivan": "SUV",  # Map minivan to SUV as closest match
             "crossover": "SUV",  # Map crossover to SUV as closest match
             "luxury": "Sedan",  # Map luxury to Sedan as default
-            "wagon": "Hatchback"  # Map wagon to Hatchback as closest match
+            "wagon": "Hatchback",  # Map wagon to Hatchback as closest match
+            "classic": "Classic"  # Add classic category
         }
         
         found_categories = set()
@@ -942,7 +961,11 @@ def search_web_for_car_info(
             if search_term in all_text:
                 found_categories.add(db_category)
         
-        extracted_insights["suggested_categories"] = list(found_categories)
+        # Combine direct suggestions and text analysis
+        extracted_insights["suggested_categories"].extend(list(found_categories))
+        
+        # Remove duplicates
+        extracted_insights["suggested_categories"] = list(set(extracted_insights["suggested_categories"]))
         
         # Common car makes to look for
         makes = ["toyota", "honda", "ford", "bmw", "mercedes", "audi", "nissan", "hyundai", "kia", "mazda", "subaru", "volkswagen"]
@@ -966,8 +989,13 @@ def search_web_for_car_info(
                 "features": ["safety", "space", "reliability"],
                 "description": "Family cars prioritize safety, space, and reliability"
             },
+            "sport": {  # Handle both "sport" and "sports" variations
+                "categories": ["Sports", "Coupe", "Convertible"],  # Use database category names
+                "features": ["performance", "speed", "handling"],
+                "description": "Sports cars focus on performance and driving experience"
+            },
             "sports car": {
-                "categories": ["Coupe", "Convertible", "Sports"],  # Use database category names
+                "categories": ["Sports", "Coupe", "Convertible"],  # Use database category names
                 "features": ["performance", "speed", "handling"],
                 "description": "Sports cars focus on performance and driving experience"
             },
@@ -1044,35 +1072,48 @@ You now have access to advanced search capabilities:
 - Advanced search with complex filters
 - **NEW: Internet search for car-related information**
 
-INTERNET SEARCH WORKFLOW - MANDATORY EXECUTION:
-When users ask about general car concepts or categories (e.g., "family car", "sports car", "fuel efficient vehicle"), you MUST follow this exact workflow:
+INTELLIGENT TOOL SELECTION STRATEGY:
+You have multiple tools available. Choose the most efficient approach based on query complexity:
 
-1. **STEP 1: Use search_web_for_car_info** to understand what car types/categories match their request
-2. **STEP 2: IMMEDIATELY extract insights** from the web search response 
-3. **STEP 3: IMMEDIATELY search database** using the extracted categories - you MUST call get_cars_data_eq for each suggested category
-4. **STEP 4: Provide results** with actual car recommendations
+**DIRECT DATABASE SEARCH** (most efficient - use when possible):
+Use get_cars_data_eq directly when you can easily map the request to database categories:
+- "I need a family car" / "family cars" / "show me family cars" → Direct search: category="SUV" and category="Sedan" 
+- "I want a sports car" / "sports cars" / "show me sports cars" → Direct search: category="Sports"
+- "I want a luxury sedan" → Direct search: category="Sedan" + price filters
+- "BMW cars under $30k" → Direct search: make="BMW" + price_max=30000
+- "Fuel efficient cars" → Direct search: category="Sedan" or category="Hatchback"
+- "Show me SUVs" → Direct search: category="SUV"
+- "I want a sedan" → Direct search: category="Sedan"
+- "Convertible cars" → Direct search: category="Convertible"
 
-MANDATORY WORKFLOW EXAMPLE:
-User: "I need a family car"
-→ STEP 1: Call search_web_for_car_info with query "family cars"
-→ STEP 2: Extract suggested_categories: ["suv", "sedan", "minivan", "crossover"]  
-→ STEP 3: IMMEDIATELY call get_cars_data_eq for category="suv", then category="sedan", then category="minivan", then category="crossover"
-→ STEP 4: Return actual car results from database
+**WEB SEARCH + DATABASE** (use for complex/unclear requests):
+Only use search_web_for_car_info when the request is ambiguous or complex:
+- "Best car for a college student" → Web search to understand requirements → Database search
+- "What's good for weekend driving?" → Web search for clarification → Database search  
+- "I need something reliable for my business" → Web search for business car types → Database search
+- "Car for elderly person with mobility issues" → Web search for specific needs → Database search
 
-YOU MUST NEVER stop after just the web search - you MUST follow through with database searches for each suggested category.
+**DECISION MAKING GUIDE:**
+1. **Can you directly map to database fields?** → Use get_cars_data_eq directly
+2. **Is the request ambiguous or complex?** → Use search_web_for_car_info first, then database
+3. **Specific car/brand query?** → Always use database directly
 
-Examples requiring this workflow:
-- "I need a family car" → Web search → Database search for SUVs, sedans, minivans
-- "What's good for a college student?" → Web search → Database search for economical cars
-- "I want something sporty" → Web search → Database search for sports cars, coupes
-- "Need something fuel efficient" → Web search → Database search for fuel efficient categories
+**COMMON MAPPINGS** (use these for direct database searches):
+- Family car → SUV, Sedan
+- Sports car → Sports  
+- Luxury car → Sedan (with higher price filters)
+- Fuel efficient → Sedan, Hatchback
+- Off-road → SUV
+- City car → Hatchback, Sedan
 
-DO NOT use web search for:
-- Specific car model questions ("Tell me about Toyota Camry")
-- Direct database queries ("Show me BMW cars under $30k")  
-- Availability questions ("Do you have any Honda Civics?")
+**NEVER use web search for:**
+- Common car categories ("family cars", "sports cars", "SUVs", "sedans", "luxury cars")
+- Specific makes/models ("Toyota Camry", "BMW 3 Series") 
+- Direct specifications ("cars under $25k", "automatic transmission")
+- Availability queries ("do you have any Honda Civics?")
+- Simple category requests ("show me convertibles", "I want a hatchback")
 
-CRITICAL: After calling search_web_for_car_info, you MUST parse the "extracted_insights" field and immediately call database search tools for each suggested category. Never stop after just the web search.
+BE EFFICIENT: If you can answer directly with database search, skip the web search step.
 
 Car data includes:
 - Car makes, models, years, and descriptions
@@ -1342,7 +1383,7 @@ def fallback_car_search(user_input: str) -> str:
         # Check for family car keywords (using correct database categories)
         if any(word in user_lower for word in ["family", "families"]):
             search_params["category"] = "SUV"
-        elif any(word in user_lower for word in ["sport", "sporty", "fast"]):
+        elif any(word in user_lower for word in ["sport", "sports", "sporty", "fast", "performance"]):
             search_params["category"] = "Sports"
         elif any(word in user_lower for word in ["luxury", "premium"]):
             search_params["category"] = "Sedan"
