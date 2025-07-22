@@ -1095,15 +1095,26 @@ IMPORTANT: Understanding Search Results
 - If total_matching > returned_count, inform user there are more results available
 - Example: "I found 150 Toyota cars matching your criteria. Here are the top 10 results sorted by price..."
 
-RESPONSE FORMAT INSTRUCTIONS:
-You MUST format ALL responses as valid JSON with exactly 2 fields:
+RESPONSE FORMAT INSTRUCTIONS - MANDATORY CONSISTENCY:
+You MUST format ALL responses as valid JSON with exactly 2 fields and consistent structure:
 
 {
-  "message": "Your helpful explanation mentioning the total number of matches found and showing top results. Include 2-3 car suggestions with make, model, year, price, and relevant details",
-  "car_ids": [1247, 891, 1356]
+  "message": "Brief explanation with total matches found. List top 3-5 cars in this exact format: 1. Make Model Year - $Price (ID: ###) - key details",
+  "car_ids": [123, 456, 789]
 }
 
-The car_ids array should contain the specific car ID numbers that match the user's requirements.
+MANDATORY FORMAT RULES:
+1. ALWAYS valid JSON - no extra text before/after
+2. car_ids must be array of numbers (not strings)
+3. message must use this exact car listing format:
+   "1. Toyota Camry 2020 - $25,000 (ID: 123) - Used, 45k miles, excellent condition
+    2. Honda Accord 2019 - $23,500 (ID: 456) - Used, 52k miles, leather seats
+    3. Nissan Altima 2021 - $27,000 (ID: 789) - Used, 30k miles, backup camera"
+
+4. Always include total count: "Found X matching cars. Here are the top Y:"
+5. NO markdown formatting (**, *, etc.) - use plain text only
+6. Keep each car description to one line
+7. Always include ID in parentheses for easy identification
 
 SEARCH STRATEGY:
 - **For general/conceptual queries**: Start with web search to understand car types, then search database
@@ -1141,6 +1152,8 @@ IMPORTANT CONSTRAINTS:
 - Use feature-based search for specific requirements
 - Recommend popular or recently added cars when appropriate
 - ALWAYS mention total_matching count when available in search results
+
+CRITICAL: EVERY response must be valid JSON with consistent formatting. NO exceptions.
 """
 
 # Initialize the model with the stable GA version
@@ -1216,6 +1229,44 @@ graph.add_edge("tools", "agent")
 # Compile the graph
 app = graph.compile()
 
+def validate_and_fix_response(response_content: str) -> str:
+    """
+    Validate and fix the AI response to ensure consistent JSON format.
+    """
+    try:
+        # Try to parse as JSON
+        data = json.loads(response_content)
+        
+        # Validate required fields
+        if not isinstance(data, dict) or "message" not in data or "car_ids" not in data:
+            raise ValueError("Missing required fields")
+        
+        # Ensure car_ids is array of numbers
+        if not isinstance(data["car_ids"], list):
+            data["car_ids"] = []
+        else:
+            # Convert string IDs to numbers if needed
+            fixed_ids = []
+            for car_id in data["car_ids"]:
+                try:
+                    fixed_ids.append(int(car_id))
+                except (ValueError, TypeError):
+                    continue
+            data["car_ids"] = fixed_ids
+        
+        # Ensure message is string
+        if not isinstance(data["message"], str):
+            data["message"] = str(data["message"])
+        
+        return json.dumps(data)
+        
+    except (json.JSONDecodeError, ValueError):
+        # If JSON parsing fails, create a fallback response
+        return json.dumps({
+            "message": "I apologize, but I encountered an error processing your request. Please try rephrasing your question.",
+            "car_ids": []
+        })
+
 def chat_with_bot(user_input: str) -> str:
     """
     Function to chat with the bot. Each request is stateless.
@@ -1239,10 +1290,16 @@ def chat_with_bot(user_input: str) -> str:
             
             if ai_messages:
                 last_ai_message = ai_messages[-1]
-                return last_ai_message.content or "I apologize, but I couldn't generate a proper response. Please try again."
+                raw_response = last_ai_message.content or "I apologize, but I couldn't generate a proper response. Please try again."
+                
+                # Validate and fix the response format
+                return validate_and_fix_response(raw_response)
             else:
                 print("No AI messages found in result")
-                return "Sorry, I couldn't process your request."
+                return json.dumps({
+                    "message": "Sorry, I couldn't process your request.",
+                    "car_ids": []
+                })
                 
         except Exception as e:
             error_msg = str(e)
@@ -1260,9 +1317,15 @@ def chat_with_bot(user_input: str) -> str:
                     return fallback_car_search(user_input)
             else:
                 # For other errors, don't retry
-                return f"Sorry, I encountered an error: {error_msg}"
+                return json.dumps({
+                    "message": f"Sorry, I encountered an error: {error_msg}",
+                    "car_ids": []
+                })
     
-    return "Sorry, I'm experiencing technical difficulties. Please try again later."
+    return json.dumps({
+        "message": "Sorry, I'm experiencing technical difficulties. Please try again later.",
+        "car_ids": []
+    })
 
 def fallback_car_search(user_input: str) -> str:
     """
@@ -1299,15 +1362,25 @@ def fallback_car_search(user_input: str) -> str:
             total_count = result_data.get("total_count", 0)
             
             response = {
-                "message": f"I found {total_count} cars that might interest you. Here are the top options:\n\n",
+                "message": f"Found {total_count} cars that might interest you. Here are the top options:",
                 "car_ids": []
             }
             
+            # Format cars consistently
+            car_list = []
             for i, car in enumerate(cars, 1):
-                response["message"] += f"{i}. {car.get('make', 'Unknown')} {car.get('model', 'Unknown')} ({car.get('year', 'N/A')}) - ${car.get('price', 'N/A'):,}\n"
+                price = car.get('price', 'N/A')
+                if isinstance(price, (int, float)):
+                    price_str = f"${price:,.0f}"
+                else:
+                    price_str = f"${price}"
+                
+                car_line = f"{i}. {car.get('make', 'Unknown')} {car.get('model', 'Unknown')} {car.get('year', 'N/A')} - {price_str} (ID: {car.get('id', 'N/A')}) - {car.get('condition', 'Used')}"
+                car_list.append(car_line)
                 response["car_ids"].append(car.get("id"))
             
-            response["message"] += "\nNote: I'm currently experiencing some technical issues, so this is a simplified search. Please try again later for more detailed assistance."
+            response["message"] += " " + " ".join(car_list)
+            response["message"] += " Note: I'm currently experiencing some technical issues, so this is a simplified search. Please try again later for more detailed assistance."
             
             return json.dumps(response)
         else:
