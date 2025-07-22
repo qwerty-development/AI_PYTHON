@@ -9,8 +9,9 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from supabase import create_client, Client
 import json
-import math
 from datetime import datetime, timedelta
+import requests
+from urllib.parse import quote
 
 load_dotenv()
 url: str = os.environ.get("EXPO_PUBLIC_SUPABASE_URL")
@@ -827,6 +828,188 @@ def search_cars_advanced(
             "data": []
         })
 
+@tool
+def search_web_for_car_info(
+    query: str,
+    max_results: int = 3
+) -> str:
+    """
+    Search the internet for car-related information to better understand user needs.
+    Use this when users ask about general car concepts like 'family car', 'sports car',
+    'fuel efficient car', etc. to understand what specific car types/categories to search for.
+    
+    Args:
+        query: The search query about cars (e.g., "best family cars", "fuel efficient vehicles")
+        max_results: Maximum number of search results to return (default: 5)
+    
+    Returns:
+        JSON string with search results and extracted car insights
+    """
+    try:
+        # Use DuckDuckGo Instant Answer API for car-related searches
+        search_url = f"https://api.duckduckgo.com/?q={quote(query)}&format=json&no_html=1&skip_disambig=1"
+        
+        # Make the search request
+        response = requests.get(search_url, timeout=10)
+        response.raise_for_status()
+        
+        data = response.json()
+        
+        # Extract relevant information (simplified to reduce token usage)
+        results = []
+        
+        # Get abstract if available (truncated)
+        if data.get('Abstract'):
+            abstract = data['Abstract'][:300] + "..." if len(data['Abstract']) > 300 else data['Abstract']
+            results.append({
+                "type": "abstract",
+                "content": abstract,
+                "source": data.get('AbstractSource', 'DuckDuckGo')
+            })
+        
+        # Get related topics (limit and truncate)
+        if data.get('RelatedTopics'):
+            for i, topic in enumerate(data['RelatedTopics'][:min(3, max_results)]):  # Limit to 3
+                if isinstance(topic, dict) and topic.get('Text'):
+                    text = topic['Text'][:200] + "..." if len(topic['Text']) > 200 else topic['Text']
+                    results.append({
+                        "type": "related_topic",
+                        "content": text,
+                        "source": "DuckDuckGo"  # Simplified
+                    })
+        
+        # If no results from DuckDuckGo, try a simple web search approach
+        if not results:
+            # Fallback: provide common car category mappings
+            car_type_mappings = {
+                "family car": ["suv", "sedan", "minivan", "crossover"],
+                "sports car": ["coupe", "convertible", "sports"],
+                "luxury car": ["sedan", "coupe", "suv"],
+                "fuel efficient": ["sedan", "hatchback", "hybrid"],
+                "off road": ["suv", "truck", "4wd"],
+                "city car": ["hatchback", "sedan", "compact"],
+                "weekend car": ["convertible", "sports", "coupe"],
+                "work car": ["sedan", "hatchback"],
+                "first car": ["sedan", "hatchback"],
+                "reliable car": ["sedan", "suv"],
+                "economical car": ["hatchback", "sedan"],
+                "safe car": ["suv", "sedan"],
+                "spacious car": ["suv", "minivan", "wagon"]
+            }
+            
+            # Check if query matches any known patterns
+            query_lower = query.lower()
+            suggested_categories = []
+            
+            for car_type, categories in car_type_mappings.items():
+                if car_type in query_lower:
+                    suggested_categories.extend(categories)
+            
+            if suggested_categories:
+                results.append({
+                    "type": "category_suggestion",
+                    "content": f"Based on your search for '{query}', I recommend looking at these vehicle categories: {', '.join(set(suggested_categories))}",
+                    "categories": list(set(suggested_categories))
+                })
+        
+        # Extract car categories and types from the results
+        extracted_insights = {
+            "suggested_categories": [],
+            "suggested_makes": [],
+            "key_features": [],
+            "price_insights": []
+        }
+        
+        # Analyze results for car-related keywords
+        all_text = " ".join([r.get("content", "") for r in results]).lower()
+        
+        # Map common car categories to database categories (exact match with database)
+        category_mapping = {
+            "suv": "SUV",
+            "sedan": "Sedan", 
+            "hatchback": "Hatchback",
+            "coupe": "Coupe",
+            "convertible": "Convertible",
+            "sports": "Sports",
+            "minivan": "SUV",  # Map minivan to SUV as closest match
+            "crossover": "SUV",  # Map crossover to SUV as closest match
+            "luxury": "Sedan",  # Map luxury to Sedan as default
+            "wagon": "Hatchback"  # Map wagon to Hatchback as closest match
+        }
+        
+        found_categories = set()
+        for search_term, db_category in category_mapping.items():
+            if search_term in all_text:
+                found_categories.add(db_category)
+        
+        extracted_insights["suggested_categories"] = list(found_categories)
+        
+        # Common car makes to look for
+        makes = ["toyota", "honda", "ford", "bmw", "mercedes", "audi", "nissan", "hyundai", "kia", "mazda", "subaru", "volkswagen"]
+        for make in makes:
+            if make in all_text:
+                extracted_insights["suggested_makes"].append(make)
+        
+        return json.dumps({
+            "success": True,
+            "query": query,
+            "results": results,
+            "extracted_insights": extracted_insights,
+            "total_results": len(results)
+        })
+        
+    except requests.RequestException as e:
+        # Fallback response with common car knowledge (using correct database categories)
+        fallback_insights = {
+            "family car": {
+                "categories": ["SUV", "Sedan"],  # Use database category names
+                "features": ["safety", "space", "reliability"],
+                "description": "Family cars prioritize safety, space, and reliability"
+            },
+            "sports car": {
+                "categories": ["Coupe", "Convertible", "Sports"],  # Use database category names
+                "features": ["performance", "speed", "handling"],
+                "description": "Sports cars focus on performance and driving experience"
+            },
+            "luxury car": {
+                "categories": ["Sedan", "Coupe", "SUV"],  # Use database category names
+                "features": ["premium", "comfort", "technology"],
+                "description": "Luxury cars offer premium features and comfort"
+            },
+            "fuel efficient": {
+                "categories": ["Sedan", "Hatchback"],  # Use database category names
+                "features": ["mpg", "hybrid", "economy"],
+                "description": "Fuel efficient cars prioritize low fuel consumption"
+            }
+        }
+        
+        # Try to match query with fallback knowledge
+        query_lower = query.lower()
+        matched_insight = None
+        for key, insight in fallback_insights.items():
+            if key in query_lower:
+                matched_insight = insight
+                break
+        
+        if matched_insight:
+            return json.dumps({
+                "success": True,
+                "query": query,
+                "fallback_used": True,
+                "extracted_insights": {
+                    "suggested_categories": matched_insight["categories"],
+                    "key_features": matched_insight["features"],
+                    "description": matched_insight["description"]
+                },
+                "error": f"Web search failed: {str(e)}, used fallback knowledge"
+            })
+        else:
+            return json.dumps({
+                "success": False,
+                "error": f"Web search failed: {str(e)}",
+                "query": query
+            })
+
 # Define tools list after function definitions
 tools = [
     get_cars_data_eq, 
@@ -837,7 +1020,8 @@ tools = [
     get_cars_by_features,
     get_recently_added_cars,
     get_popular_cars,
-    search_cars_advanced
+    search_cars_advanced,
+    search_web_for_car_info  # Add the new web search tool
 ]
 
 system_prompt = """
@@ -858,6 +1042,37 @@ You now have access to advanced search capabilities:
 - Recently added cars
 - Popular cars based on views/likes
 - Advanced search with complex filters
+- **NEW: Internet search for car-related information**
+
+INTERNET SEARCH WORKFLOW - MANDATORY EXECUTION:
+When users ask about general car concepts or categories (e.g., "family car", "sports car", "fuel efficient vehicle"), you MUST follow this exact workflow:
+
+1. **STEP 1: Use search_web_for_car_info** to understand what car types/categories match their request
+2. **STEP 2: IMMEDIATELY extract insights** from the web search response 
+3. **STEP 3: IMMEDIATELY search database** using the extracted categories - you MUST call get_cars_data_eq for each suggested category
+4. **STEP 4: Provide results** with actual car recommendations
+
+MANDATORY WORKFLOW EXAMPLE:
+User: "I need a family car"
+→ STEP 1: Call search_web_for_car_info with query "family cars"
+→ STEP 2: Extract suggested_categories: ["suv", "sedan", "minivan", "crossover"]  
+→ STEP 3: IMMEDIATELY call get_cars_data_eq for category="suv", then category="sedan", then category="minivan", then category="crossover"
+→ STEP 4: Return actual car results from database
+
+YOU MUST NEVER stop after just the web search - you MUST follow through with database searches for each suggested category.
+
+Examples requiring this workflow:
+- "I need a family car" → Web search → Database search for SUVs, sedans, minivans
+- "What's good for a college student?" → Web search → Database search for economical cars
+- "I want something sporty" → Web search → Database search for sports cars, coupes
+- "Need something fuel efficient" → Web search → Database search for fuel efficient categories
+
+DO NOT use web search for:
+- Specific car model questions ("Tell me about Toyota Camry")
+- Direct database queries ("Show me BMW cars under $30k")  
+- Availability questions ("Do you have any Honda Civics?")
+
+CRITICAL: After calling search_web_for_car_info, you MUST parse the "extracted_insights" field and immediately call database search tools for each suggested category. Never stop after just the web search.
 
 Car data includes:
 - Car makes, models, years, and descriptions
@@ -891,14 +1106,24 @@ You MUST format ALL responses as valid JSON with exactly 2 fields:
 The car_ids array should contain the specific car ID numbers that match the user's requirements.
 
 SEARCH STRATEGY:
+- **For general/conceptual queries**: Start with web search to understand car types, then search database
+- **For specific queries**: Search database directly with appropriate filters
 - If initial search returns no results, try alternative approaches:
-  1. Broaden search criteria (wider price range, more years, etc.)
-  2. Use text search with similar terms
-  3. Search for similar categories or makes
-  4. Suggest alternatives based on market insights
+  1. Use web search to find related car types/categories
+  2. Broaden search criteria (wider price range, more years, etc.)
+  3. Use text search with similar terms
+  4. Search for similar categories or makes
+  5. Suggest alternatives based on market insights
 - Always try at least 2 different search approaches if first fails
 - Use market insights to provide context and alternatives
 - Always communicate the scope of results (total matches vs. shown results)
+
+ENHANCED WORKFLOW WITH WEB SEARCH:
+1. **Analyze user query**: Is it conceptual ("family car") or specific ("Toyota under $20k")?
+2. **If conceptual**: Use search_web_for_car_info first
+3. **Extract insights**: Get suggested categories, makes, features from web results
+4. **Search database**: Use extracted insights to build targeted database queries
+5. **Provide results**: Combine web insights with database results for comprehensive answers
 
 IMPORTANT CONSTRAINTS:
 - ONLY search cars where status = 'available'
@@ -918,9 +1143,9 @@ IMPORTANT CONSTRAINTS:
 - ALWAYS mention total_matching count when available in search results
 """
 
-# Initialize the model
+# Initialize the model with the stable GA version
 llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash-lite-preview-06-17", 
+    model="gemini-2.5-flash", 
     api_key=os.getenv("GEMINI_API_KEY"),
     temperature=0
 )
@@ -996,26 +1221,107 @@ def chat_with_bot(user_input: str) -> str:
     Function to chat with the bot. Each request is stateless.
     Frontend handles conversation history management.
     """
+    import time
+    
+    max_retries = 3
+    base_delay = 2
+    
+    for attempt in range(max_retries):
+        try:
+            # Create a fresh state for each request
+            current_input = {"messages": [HumanMessage(content=user_input)]}
+            
+            # Run the agent with just the current message
+            result = app.invoke(current_input)
+            
+            # Extract the last AI message
+            ai_messages = [msg for msg in result["messages"] if isinstance(msg, AIMessage)]
+            
+            if ai_messages:
+                last_ai_message = ai_messages[-1]
+                return last_ai_message.content or "I apologize, but I couldn't generate a proper response. Please try again."
+            else:
+                print("No AI messages found in result")
+                return "Sorry, I couldn't process your request."
+                
+        except Exception as e:
+            error_msg = str(e)
+            print(f"Error running agent (attempt {attempt + 1}): {error_msg}")
+            
+            # Check if it's a Gemini API error that we should retry
+            if "500" in error_msg or "InternalServerError" in error_msg or "rate" in error_msg.lower():
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)  # Exponential backoff
+                    print(f"Retrying in {delay} seconds...")
+                    time.sleep(delay)
+                    continue
+                else:
+                    # If it's a persistent API error, try a simplified response
+                    return fallback_car_search(user_input)
+            else:
+                # For other errors, don't retry
+                return f"Sorry, I encountered an error: {error_msg}"
+    
+    return "Sorry, I'm experiencing technical difficulties. Please try again later."
+
+def fallback_car_search(user_input: str) -> str:
+    """
+    Fallback function that directly searches the database without using the LLM.
+    Used when the AI agent is experiencing issues.
+    """
     try:
-        # Create a fresh state for each request
-        current_input = {"messages": [HumanMessage(content=user_input)]}
+        # Simple keyword-based search for common car-related terms
+        user_lower = user_input.lower()
         
-        # Run the agent with just the current message
-        result = app.invoke(current_input)
+        # Try to extract basic search criteria
+        search_params = {}
         
-        # Extract the last AI message
-        ai_messages = [msg for msg in result["messages"] if isinstance(msg, AIMessage)]
+        # Check for family car keywords (using correct database categories)
+        if any(word in user_lower for word in ["family", "families"]):
+            search_params["category"] = "SUV"
+        elif any(word in user_lower for word in ["sport", "sporty", "fast"]):
+            search_params["category"] = "Sports"
+        elif any(word in user_lower for word in ["luxury", "premium"]):
+            search_params["category"] = "Sedan"
         
-        if ai_messages:
-            last_ai_message = ai_messages[-1]
-            return last_ai_message.content or "I apologize, but I couldn't generate a proper response. Please try again."
+        # Check for budget mentions
+        if "budget" in user_lower or "cheap" in user_lower or "affordable" in user_lower:
+            search_params["price_max"] = 25000
+        elif "expensive" in user_lower or "high-end" in user_lower:
+            search_params["price_min"] = 50000
+        
+        # Perform a basic database search
+        result = get_cars_data_eq.invoke(search_params)
+        result_data = json.loads(result)
+        
+        if result_data.get("success") and result_data.get("data"):
+            cars = result_data["data"][:3]  # Get top 3 results
+            total_count = result_data.get("total_count", 0)
+            
+            response = {
+                "message": f"I found {total_count} cars that might interest you. Here are the top options:\n\n",
+                "car_ids": []
+            }
+            
+            for i, car in enumerate(cars, 1):
+                response["message"] += f"{i}. {car.get('make', 'Unknown')} {car.get('model', 'Unknown')} ({car.get('year', 'N/A')}) - ${car.get('price', 'N/A'):,}\n"
+                response["car_ids"].append(car.get("id"))
+            
+            response["message"] += "\nNote: I'm currently experiencing some technical issues, so this is a simplified search. Please try again later for more detailed assistance."
+            
+            return json.dumps(response)
         else:
-            print("No AI messages found in result")
-            return "Sorry, I couldn't process your request."
+            return json.dumps({
+                "message": "I'm currently experiencing technical difficulties and couldn't find any cars matching your criteria. Please try again later.",
+                "car_ids": []
+            })
             
     except Exception as e:
-        print(f"Error running agent: {e}")
-        return f"Sorry, I encountered an error: {str(e)}"
+        print(f"Fallback search error: {e}")
+        return json.dumps({
+            "message": "I'm currently experiencing technical difficulties. Please try again later or contact support if the problem persists.",
+            "car_ids": []
+        })
 
 # Interactive chat function for testing (kept for local development)
 def start_interactive_chat():
@@ -1106,6 +1412,39 @@ if __name__ == "__main__":
             "sort_options": "price:asc"
         })
         print(result7)
+        
+        # Example 8: Web search
+        print("\n8. Testing search_web_for_car_info:")
+        result8 = search_web_for_car_info.invoke({
+            "query": "best family cars"
+        })
+        print(result8)
+        
+        # Example 9: Demonstrating web search + database search workflow
+        print("\n9. Testing combined web search + database search workflow:")
+        
+        # First, search web for family cars
+        web_result = search_web_for_car_info.invoke({
+            "query": "family cars with good safety ratings"
+        })
+        web_data = json.loads(web_result)
+        
+        if web_data.get("success") and web_data.get("extracted_insights"):
+            suggested_categories = web_data["extracted_insights"].get("suggested_categories", [])
+            print(f"Web search suggested categories: {suggested_categories}")
+            
+            # Then search database using the suggested categories
+            if suggested_categories:
+                for category in suggested_categories[:2]:  # Test first 2 categories
+                    print(f"\nSearching database for {category} cars:")
+                    db_result = get_cars_data_eq.invoke({
+                        "category": category,
+                        "price_max": 40000,
+                        "condition": "Used"
+                    })
+                    db_data = json.loads(db_result)
+                    if db_data.get("success"):
+                        print(f"Found {db_data.get('total_count', 0)} {category} cars")
         
         print("\n✅ All enhanced function tests completed successfully!")
         
