@@ -125,12 +125,27 @@ def get_cars_data_eq(
         
         # Execute the query without limit - get ALL results
         result = query.execute()
-        
-        # Return ALL data
+
+        # Remove potential duplicate rows (based on unique car ID) that may arise
+        # from Supabase queries with complex filters or joins. This guarantees
+        # the total_count matches the actual number of unique cars we are
+        # returning to the user and avoids inconsistent counts the user has
+        # reported (e.g. duplicates leading to 99 vs 156 results).
+        unique_data: List[Dict[str, Any]] = []
+        seen_ids = set()
+        for car in result.data:
+            car_id = car.get("id")
+            if car_id is None or car_id in seen_ids:
+                # Skip duplicates or rows without an ID
+                continue
+            seen_ids.add(car_id)
+            unique_data.append(car)
+
+        # Return ALL unique car data
         return json.dumps({
             "success": True,
-            "total_count": len(result.data),
-            "data": result.data
+            "total_count": len(unique_data),
+            "data": unique_data
         })
         
     except Exception as e:
