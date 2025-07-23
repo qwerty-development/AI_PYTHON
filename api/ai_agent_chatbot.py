@@ -1136,6 +1136,7 @@ ABSOLUTE RULE – USE TOOLS FIRST
 • Before answering you MUST execute at least one of the provided tools.
 • Never fabricate car data or IDs.
 • If unsure which tool to use, start with search_web_for_car_info to map the user's intent.
+• CRITICAL: If you use search_web_for_car_info, you MUST follow up with get_cars_data_eq to query actual inventory.
 
 AVAILABLE TOOLS
 • get_cars_data_eq – structured search by filters (make, model, category, price, etc.)
@@ -1152,7 +1153,7 @@ SIMPLIFIED DECISION GUIDE
 1. Exact model searches → get_cars_data_eq (e.g., "Mercedes C300", "BMW X5")
 2. Model FAMILY searches → get_cars_data_eq with simplified model terms (e.g., "Mercedes C series" → make="Mercedes" + model="C")
 3. "Similar to car ID" → get_similar_cars
-4. Lifestyle/vague requests ("family car", "student car") → search_web_for_car_info first, then get_cars_data_eq
+4. Lifestyle/vague requests ("family car", "student car") → search_web_for_car_info first, then ALWAYS get_cars_data_eq with suggested categories
 5. Recent/popular cars → get_recently_added_cars / get_popular_cars
 6. Market analysis → get_market_insights
 7. Feature-specific → get_cars_by_features
@@ -1178,23 +1179,27 @@ KEY IMPROVEMENTS
 
 WORKFLOW
 a) Run the chosen tool(s). If two tools are needed (web + db), run web search first.
-b) For CAR COMPARISONS: Use MULTIPLE tool calls in sequence:
+b) MANDATORY: After ANY web search, ALWAYS follow up with database search using extracted insights.
+   - If search_web_for_car_info suggests categories like ["SUV", "Sedan"], immediately run get_cars_data_eq with those categories
+   - NEVER stop after just web search - you must query the actual inventory
+c) For CAR COMPARISONS: Use MULTIPLE tool calls in sequence:
    - search_web_for_car_info for Car A (e.g., "Mercedes C300 for young drivers pros cons")
    - search_web_for_car_info for Car B (e.g., "Audi A7 for young drivers pros cons") 
    - get_cars_data_eq for Car A inventory (make="Mercedes", model="C300")
    - get_cars_data_eq for Car B inventory (make="Audi", model="A7")
-c) Inspect ALL tool results and synthesize into comprehensive comparison.
-d) Reply with ONE JSON object created from ALL tool data combined.
+d) Inspect ALL tool results and synthesize into comprehensive comparison.
+e) Reply with ONE JSON object created from ALL tool data combined.
 
 
 RESPONSE FORMAT (strict)
 {
   "message": "{Your message here}",
-  "car_ids": [list_of_all_matching_car_ids]
+  "car_ids": [list_of_matching_car_ids]
 }
 • No markdown or code fences.
-• When you do want to talk about cars, just talk about top 3 in different categories ( for example categories like budget, luxury, sports, etc..).
-• Include ALL ids in "car_ids".Do not mention car ids elsewhere.
+• When you find many cars (25+), provide educational guidance about what makes a good car for their needs. For family cars, explain safety features, space requirements, reliability factors. Then ask targeted questions about their priorities (budget, family size, must-have features) .
+• When showing cars, only mention top 3-5 cars with brief details (make, model, year, price).
+• Include relevant car IDs in "car_ids" array (if there are more than 15 include the first 15). Never mention IDs or inventory counts in the message text.
 • If no cars match, apologize and suggest adjusting the search parameters.
 
 AGE-SPECIFIC RECOMMENDATIONS
@@ -1202,6 +1207,13 @@ AGE-SPECIFIC RECOMMENDATIONS
 • For college students: Focus on affordability, low maintenance, good resale value
 • For families: Emphasize safety, space, reliability, comfort features
 • For seniors: Highlight ease of entry/exit, visibility, safety features, comfort
+
+RESULT HANDLING
+• If you get 15+ cars from search tools, provide educational guidance instead of listing everything.
+• Explain what makes a good family car and guide them through key considerations.
+• Ask targeted questions to narrow down their specific needs.
+• Don't mention exact numbers of cars found or reference inventory counts.
+• Only show specific cars when results are focused (under 15 cars) or user provides constraints.
 
 STYLE
 • Friendly, concise, professional.
@@ -1304,6 +1316,21 @@ def validate_and_fix_response(response_content: str) -> str:
         
         cleaned_content = cleaned_content.strip()
         
+        # Handle corrupted/truncated JSON by finding the first complete JSON object
+        brace_count = 0
+        json_end = -1
+        for i, char in enumerate(cleaned_content):
+            if char == '{':
+                brace_count += 1
+            elif char == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    json_end = i + 1
+                    break
+        
+        if json_end > 0:
+            cleaned_content = cleaned_content[:json_end]
+        
         # Try to parse as JSON
         data = json.loads(cleaned_content)
         
@@ -1311,29 +1338,38 @@ def validate_and_fix_response(response_content: str) -> str:
         if not isinstance(data, dict) or "message" not in data or "car_ids" not in data:
             raise ValueError("Missing required fields")
         
-        # Ensure car_ids is array of numbers
+        # Ensure car_ids is array of numbers (deduplicated)
         if not isinstance(data["car_ids"], list):
             data["car_ids"] = []
         else:
-            # Convert string IDs to numbers if needed
+            # Convert string IDs to numbers and remove duplicates
             fixed_ids = []
+            seen_ids = set()
             for car_id in data["car_ids"]:
                 try:
-                    fixed_ids.append(int(car_id))
+                    id_int = int(car_id)
+                    if id_int not in seen_ids:
+                        fixed_ids.append(id_int)
+                        seen_ids.add(id_int)
                 except (ValueError, TypeError):
                     continue
             data["car_ids"] = fixed_ids
         
-        # Ensure message is string
+        # Ensure message is string and not too long
         if not isinstance(data["message"], str):
             data["message"] = str(data["message"])
         
+        # Truncate message if too long (prevent token overflow)
+        if len(data["message"]) > 2000:
+            data["message"] = data["message"][:1900] + "... Please let me know if you'd like more details about any specific cars."
+        
         return json.dumps(data)
         
-    except (json.JSONDecodeError, ValueError):
+    except (json.JSONDecodeError, ValueError) as e:
+        print(f"JSON validation error: {e}")
         # If JSON parsing fails, create a fallback response
         return json.dumps({
-            "message": "I apologize, but I encountered an error processing your request. Please try rephrasing your question.",
+            "message": "I found several family cars for you. To help narrow down the options, could you share your budget range or any specific preferences (brand, size, features)?",
             "car_ids": []
         })
 
