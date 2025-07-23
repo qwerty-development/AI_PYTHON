@@ -19,13 +19,18 @@ key: str = os.environ.get("EXPO_PUBLIC_SUPABASE_ANON_KEY")
 
 supabase: Client = create_client(url, key)
 
+# ↓↓↓ NEW: Limit payload size returned to the LLM ↓↓↓
+DEFAULT_CAR_COLUMNS = "id,listed_at,make,model,price,year,images,mileage,condition,transmission,color,category,views,likes,features"
+DEFAULT_RESULT_LIMIT = 20
+# ↑↑↑ NEW CONSTANTS ↑↑↑
+
 class AgentState(TypedDict):
     """State of the agent."""
     messages: Annotated[Sequence[BaseMessage], add_messages]
 
 @tool
 def get_cars_data_eq(
-    select_fields: str = "*",
+    select_fields: str = DEFAULT_CAR_COLUMNS,
     make: str = None,
     model: str = None,
     year_min: int = None,
@@ -136,7 +141,8 @@ def get_cars_data_eq(
         else:
             query = query.order(order_by, desc=True)
         
-        # Execute the query without limit - get ALL results
+        # Limit payload size before executing
+        query = query.limit(DEFAULT_RESULT_LIMIT)
         result = query.execute()
 
         # Remove potential duplicate rows (based on unique car ID) that may arise
@@ -200,8 +206,8 @@ def search_cars_text(
         JSON string with ALL matching cars
     """
     try:
-        # Start with base query
-        query = supabase.table("cars").select("*")
+        # Start with base query (limited columns)
+        query = supabase.table("cars").select(DEFAULT_CAR_COLUMNS)
         
         # Apply status filter
         if status:
@@ -234,36 +240,40 @@ def search_cars_text(
         if year_max:
             query = query.lte("year", year_max)
         
-        # Enhanced text search with multiple keywords
+        # Enhanced text search with proper OR handling
         search_fields = [field.strip() for field in fields_to_search.split(",")]
         
         if search_term:
-            search_keywords = search_term.split()
-            all_conditions = []
-            
-            # For each keyword, search across all fields
-            for keyword in search_keywords:
-                keyword_conditions = []
-                for field in search_fields:
-                    keyword_conditions.append(f"{field}.ilike.%{keyword}%")
-                # Each keyword should match at least one field
-                all_conditions.append(f"({','.join(keyword_conditions)})")
-            
-            # All keywords should be found (AND logic between keywords)
-            if all_conditions:
-                if len(all_conditions) == 1:
-                    query = query.or_(all_conditions[0])
-                else:
-                    # For multiple keywords, we need a more complex approach
-                    # For now, use OR logic for better recall
-                    or_conditions = []
-                    for keyword in search_keywords:
+            # Handle OR operators in search terms (e.g., "C300 OR C350 OR C43")
+            if " OR " in search_term.upper():
+                # Split by OR and clean up terms
+                or_terms = [term.strip() for term in search_term.upper().split(" OR ")]
+                or_conditions = []
+                
+                # For each OR term, search across all fields
+                for term in or_terms:
+                    if term:  # Skip empty terms
+                        for field in search_fields:
+                            or_conditions.append(f"{field}.ilike.%{term}%")
+                
+                if or_conditions:
+                    query = query.or_(",".join(or_conditions))
+            else:
+                # Handle regular keywords (space-separated)
+                search_keywords = [kw for kw in search_term.split() if kw.upper() != "OR"]
+                or_conditions = []
+                
+                # For each keyword, search across all fields
+                for keyword in search_keywords:
+                    if keyword:  # Skip empty keywords
                         for field in search_fields:
                             or_conditions.append(f"{field}.ilike.%{keyword}%")
+                
+                if or_conditions:
                     query = query.or_(",".join(or_conditions))
         
-        # Order by price for consistency
-        query = query.order("price", desc=False)
+        # Order and limit
+        query = query.order("price", desc=False).limit(DEFAULT_RESULT_LIMIT)
         
         # Execute query without limit - get ALL results
         result = query.execute()
@@ -319,8 +329,8 @@ def get_similar_cars(
         ref_car = ref_result.data[0]
         factors = [f.strip() for f in similarity_factors.split(",")]
         
-        # Start building query for similar cars
-        query = supabase.table("cars").select("*").neq("id", car_id).eq("status", "available")
+        # Start building query for similar cars (limited columns)
+        query = supabase.table("cars").select(DEFAULT_CAR_COLUMNS).neq("id", car_id).eq("status", "available")
         
         # Apply similarity filters based on factors
         conditions = []
@@ -352,8 +362,8 @@ def get_similar_cars(
         # Order by price
         query = query.order("price", desc=False)
         
-        # Execute without limit - get ALL results
-        result = query.execute()
+        # Execute with result cap
+        result = query.limit(DEFAULT_RESULT_LIMIT).execute()
         
         return json.dumps({
             "success": True,
@@ -402,7 +412,7 @@ def get_cars_by_budget_range(
         JSON string with ALL cars in budget range
     """
     try:
-        query = supabase.table("cars").select("*")
+        query = supabase.table("cars").select(DEFAULT_CAR_COLUMNS)
         query = query.gte("price", int(budget_min)).lte("price", int(budget_max))
         query = query.eq("status", "available")
         
@@ -422,7 +432,7 @@ def get_cars_by_budget_range(
         # Apply sorting
         query = query.order(sort_by, desc=False)
         
-        # Execute without limit - get ALL results
+        query = query.limit(DEFAULT_RESULT_LIMIT)
         result = query.execute()
         
         return json.dumps({
@@ -582,7 +592,7 @@ def get_cars_by_features(
         JSON string with ALL cars matching features
     """
     try:
-        query = supabase.table("cars").select("*").eq("status", "available")
+        query = supabase.table("cars").select(DEFAULT_CAR_COLUMNS).eq("status", "available")
         
         # Apply basic filters
         if price_max is not None:
@@ -605,8 +615,8 @@ def get_cars_by_features(
                     # Simple text containment search
                     query = query.filter("features", "cs", f'["{feature}"]')
         
-        # Order by price
-        query = query.order("price", desc=False)
+        # Order and limit
+        query = query.order("price", desc=False).limit(DEFAULT_RESULT_LIMIT)
         
         # Execute without limit - get ALL results
         result = query.execute()
@@ -672,7 +682,7 @@ def get_recently_added_cars(
         date_threshold = datetime.now() - timedelta(days=days_back)
         date_str = date_threshold.strftime('%Y-%m-%d')
         
-        query = supabase.table("cars").select("*").eq("status", "available")
+        query = supabase.table("cars").select(DEFAULT_CAR_COLUMNS).eq("status", "available")
         # Use listed_at instead of created_at (based on database schema)
         query = query.gte("listed_at", date_str)
         
@@ -685,8 +695,8 @@ def get_recently_added_cars(
         if make:
             query = query.ilike("make", f"%{make}%")
         
-        # Order by listing date (newest first)
-        query = query.order("listed_at", desc=True)
+        # Order newest first and cap results
+        query = query.order("listed_at", desc=True).limit(DEFAULT_RESULT_LIMIT)
         
         # Execute without limit - get ALL results
         result = query.execute()
@@ -730,7 +740,7 @@ def get_popular_cars(
         JSON string with ALL popular cars
     """
     try:
-        query = supabase.table("cars").select("*").eq("status", "available")
+        query = supabase.table("cars").select(DEFAULT_CAR_COLUMNS).eq("status", "available")
         
         if category:
             query = query.eq("category", category)
@@ -753,7 +763,7 @@ def get_popular_cars(
         else:
             query = query.order("views", desc=True)
         
-        # Execute without limit - get ALL results
+        query = query.limit(DEFAULT_RESULT_LIMIT)
         result = query.execute()
         
         return json.dumps({
@@ -801,8 +811,8 @@ def search_cars_advanced(
                 "data": []
             })
         
-        # Start building query
-        query = supabase.table("cars").select("*").eq("status", "available")
+        # Start building query with limited payload
+        query = supabase.table("cars").select(DEFAULT_CAR_COLUMNS).eq("status", "available")
         
         # Apply all filters dynamically with improved logic
         for key, value in filter_dict.items():
@@ -853,7 +863,7 @@ def search_cars_advanced(
         except ValueError:
             query = query.order("price", desc=False)
         
-        # Execute without limit - get ALL results
+        query = query.limit(DEFAULT_RESULT_LIMIT)
         result = query.execute()
         
         return json.dumps({
@@ -1116,7 +1126,7 @@ tools = [
 ]
 
 system_prompt = """
-You are CarFinder.ai – a professional assistant for our online car marketplace.
+You are CarFinder.ai – a professional assistant for our online car marketplace.you will be helping our customers to find their car.
 
 PRIMARY GOALS
 1. Find relevant cars in our Supabase inventory that match the user's needs.
@@ -1139,33 +1149,59 @@ AVAILABLE TOOLS
 • finishedUsingTools – call when done with tools and ready to respond
 
 SIMPLIFIED DECISION GUIDE
-1. Most searches → search_cars (handles make, model, price, year, category, keywords, etc.)
-2. "Similar to car ID" → get_similar_cars
-3. Lifestyle/vague requests ("family car", "student car") → search_web_for_car_info first, then search_cars
-4. Recent/popular cars → get_recently_added_cars / get_popular_cars
-5. Market analysis → get_market_insights
-6. Feature-specific → get_cars_by_features
+1. Exact model searches → get_cars_data_eq (e.g., "Mercedes C300", "BMW X5")
+2. Model FAMILY searches → get_cars_data_eq with simplified model terms (e.g., "Mercedes C series" → make="Mercedes" + model="C")
+3. "Similar to car ID" → get_similar_cars
+4. Lifestyle/vague requests ("family car", "student car") → search_web_for_car_info first, then get_cars_data_eq
+5. Recent/popular cars → get_recently_added_cars / get_popular_cars
+6. Market analysis → get_market_insights
+7. Feature-specific → get_cars_by_features
+8. CAR COMPARISONS ("X vs Y", "which is better X or Y") → ALWAYS do ALL of these steps:
+   a) search_web_for_car_info for each car model separately (e.g., "Mercedes C300 review", "Audi A7 review")
+   b) get_cars_data_eq to find available inventory for each make/model
+   c) Provide detailed comparison with pros/cons, available cars, and recommendation based on user context
+
+MODEL FAMILY MAPPING RULES
+• Mercedes "C serie/C-Class/C class" → use get_cars_data_eq with make="Mercedes" + model="C" for better fuzzy matching
+• BMW "3 series/3-series" → use get_cars_data_eq with make="BMW" + model="3" for better fuzzy matching  
+• Audi "A4 line/A4 series" → use get_cars_data_eq with make="Audi" + model="A4" for better fuzzy matching
+• When user says "serie/series/class", use get_cars_data_eq with simplified model search
+• Always use "Mercedes" (not "Mercedes-Benz") in searches - fuzzy matching handles it
+• Prefer get_cars_data_eq over search_cars_text for make/model combinations
 
 KEY IMPROVEMENTS
-• search_cars handles: structured filters, text search, budget ranges, category synonyms
+• get_cars_data_eq handles: structured filters, text search, budget ranges, category synonyms
 • No more confusion between similar tools - ONE main search tool
 • Automatic category mapping (family car → SUV, sports car → Sports, etc.)
+• Better model family mapping (C-Class → C300/C350/etc. search)
 • Better performance with unified queries
 
 WORKFLOW
 a) Run the chosen tool(s). If two tools are needed (web + db), run web search first.
-b) Inspect the tool result(s).
-c) Reply with ONE JSON object created solely from the tool data.
+b) For CAR COMPARISONS: Use MULTIPLE tool calls in sequence:
+   - search_web_for_car_info for Car A (e.g., "Mercedes C300 for young drivers pros cons")
+   - search_web_for_car_info for Car B (e.g., "Audi A7 for young drivers pros cons") 
+   - get_cars_data_eq for Car A inventory (make="Mercedes", model="C300")
+   - get_cars_data_eq for Car B inventory (make="Audi", model="A7")
+c) Inspect ALL tool results and synthesize into comprehensive comparison.
+d) Reply with ONE JSON object created from ALL tool data combined.
+
 
 RESPONSE FORMAT (strict)
 {
-  "message": "Found X cars. {Brief description of top 5 cars}. 1. Make Model Year – $Price (ID:###) – Condition ...",
+  "message": "{Your message here}",
   "car_ids": [list_of_all_matching_car_ids]
 }
 • No markdown or code fences.
-• Include details of up to 5 cars in "message"; include ALL ids in "car_ids".
-• Always mention total_count in the message.
+• When you do want to talk about cars, just talk about top 3 in different categories ( for example categories like budget, luxury, sports, etc..).
+• Include ALL ids in "car_ids".Do not mention car ids elsewhere.
 • If no cars match, apologize and suggest adjusting the search parameters.
+
+AGE-SPECIFIC RECOMMENDATIONS
+• For young drivers (18-25): Prioritize safety ratings, reliability, insurance costs, fuel efficiency
+• For college students: Focus on affordability, low maintenance, good resale value
+• For families: Emphasize safety, space, reliability, comfort features
+• For seniors: Highlight ease of entry/exit, visibility, safety features, comfort
 
 STYLE
 • Friendly, concise, professional.
@@ -1248,18 +1284,23 @@ app = graph.compile()
 def validate_and_fix_response(response_content: str) -> str:
     """
     Validate and fix the AI response to ensure consistent JSON format.
+    Handles both string and list response_content.
     """
+    import json
     try:
-        # Clean up markdown formatting if present
-        cleaned_content = response_content.strip()
+        # If response_content is a list, join its elements into a string
+        if isinstance(response_content, list):
+            cleaned_content = " ".join(str(x) for x in response_content).strip()
+        else:
+            cleaned_content = str(response_content).strip()
         
         # Remove markdown code blocks if they exist
         if cleaned_content.startswith('```json'):
-            cleaned_content = cleaned_content[7:]  # Remove ```json
+            cleaned_content = cleaned_content[7:]
         if cleaned_content.startswith('```'):
-            cleaned_content = cleaned_content[3:]   # Remove ```
+            cleaned_content = cleaned_content[3:]
         if cleaned_content.endswith('```'):
-            cleaned_content = cleaned_content[:-3]  # Remove trailing ```
+            cleaned_content = cleaned_content[:-3]
         
         cleaned_content = cleaned_content.strip()
         
@@ -1310,6 +1351,7 @@ def chat_with_bot(user_input: str, conversation_history: list = None) -> str:
     """
     import time
     import traceback
+    import json  # Ensure json is always imported for error handling
     
     max_retries = 3
     base_delay = 2
@@ -1331,7 +1373,6 @@ def chat_with_bot(user_input: str, conversation_history: list = None) -> str:
                         assistant_content = msg.get("content", "")
                         try:
                             # If it's JSON, extract the message field
-                            import json
                             parsed = json.loads(assistant_content)
                             if isinstance(parsed, dict) and "message" in parsed:
                                 assistant_content = parsed["message"]
