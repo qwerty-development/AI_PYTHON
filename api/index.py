@@ -12,6 +12,7 @@ import asyncio
 import uvicorn
 import os
 import platform
+import json
 from datetime import datetime
 
 # Flexible imports to allow running as a module (python -m api.index)
@@ -289,8 +290,35 @@ async def test_endpoint():
         "timestamp": datetime.now().isoformat(),
         "python_version": platform.python_version(),
         "has_api_key": bool(os.getenv("GEMINI_API_KEY")),
+        "has_supabase_url": bool(os.getenv("EXPO_PUBLIC_SUPABASE_URL")),
+        "has_supabase_key": bool(os.getenv("EXPO_PUBLIC_SUPABASE_ANON_KEY")),
         "environment": "vercel"
     }
+
+@app.get("/debug-db")
+async def debug_db():
+    """Debug database connection"""
+    try:
+        from .ai_agent_chatbot import search_cars
+        
+        # Test simple database query
+        result = search_cars.invoke({"category": "SUV", "limit": 1})
+        result_data = json.loads(result)
+        
+        return {
+            "success": True,
+            "database_connection": "working",
+            "query_result": result_data.get("success", False),
+            "total_count": result_data.get("total_count", 0)
+        }
+    except Exception as e:
+        import traceback
+        return {
+            "success": False,
+            "database_connection": "failed",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
 
 # ====================================================================
 # REACT NATIVE INTEGRATION EXAMPLES

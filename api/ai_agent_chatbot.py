@@ -1334,12 +1334,15 @@ def chat_with_bot(user_input: str, conversation_history: list = None) -> str:
         JSON string with AI response
     """
     import time
+    import traceback
     
     max_retries = 3
     base_delay = 2
     
     for attempt in range(max_retries):
         try:
+            print(f"🤖 chat_with_bot attempt {attempt + 1}: {user_input[:50]}...")
+            
             # Build message history
             messages = []
             
@@ -1364,12 +1367,15 @@ def chat_with_bot(user_input: str, conversation_history: list = None) -> str:
             
             # Add current user message
             messages.append(HumanMessage(content=user_input))
+            print(f"📝 Built message history with {len(messages)} messages")
             
             # Create state with message history
             current_input = {"messages": messages}
             
             # Run the agent
+            print("🚀 Invoking AI agent...")
             result = app.invoke(current_input)
+            print("✅ AI agent completed successfully")
             
             # Extract the last AI message
             ai_messages = [msg for msg in result["messages"] if isinstance(msg, AIMessage)]
@@ -1377,11 +1383,14 @@ def chat_with_bot(user_input: str, conversation_history: list = None) -> str:
             if ai_messages:
                 last_ai_message = ai_messages[-1]
                 raw_response = last_ai_message.content or "I apologize, but I couldn't generate a proper response. Please try again."
+                print(f"📤 Raw AI response received: {len(raw_response)} characters")
                 
                 # Validate and fix the response format
-                return validate_and_fix_response(raw_response)
+                validated_response = validate_and_fix_response(raw_response)
+                print(f"✅ Response validated and returning")
+                return validated_response
             else:
-                print("No AI messages found in result")
+                print("❌ No AI messages found in result")
                 return json.dumps({
                     "message": "Sorry, I couldn't process your request.",
                     "car_ids": []
@@ -1389,25 +1398,29 @@ def chat_with_bot(user_input: str, conversation_history: list = None) -> str:
                 
         except Exception as e:
             error_msg = str(e)
-            print(f"Error running agent (attempt {attempt + 1}): {error_msg}")
+            print(f"❌ Error running agent (attempt {attempt + 1}): {error_msg}")
+            print(f"📍 Traceback: {traceback.format_exc()}")
             
             # Check if it's a Gemini API error that we should retry
             if "500" in error_msg or "InternalServerError" in error_msg or "rate" in error_msg.lower():
                 if attempt < max_retries - 1:
                     delay = base_delay * (2 ** attempt)  # Exponential backoff
-                    print(f"Retrying in {delay} seconds...")
+                    print(f"🔄 Retrying in {delay} seconds...")
                     time.sleep(delay)
                     continue
                 else:
                     # If it's a persistent API error, try a simplified response
+                    print("🔄 Max retries reached, falling back to simplified search")
                     return fallback_car_search(user_input)
             else:
                 # For other errors, don't retry
+                print(f"💥 Non-retryable error, returning error message")
                 return json.dumps({
                     "message": f"Sorry, I encountered an error: {error_msg}",
                     "car_ids": []
                 })
     
+    print("⚠️ All retries exhausted")
     return json.dumps({
         "message": "Sorry, I'm experiencing technical difficulties. Please try again later.",
         "car_ids": []
