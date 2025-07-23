@@ -1061,7 +1061,7 @@ d) Reply with EXACTLY ONE JSON object - nothing else
 CRITICAL RESPONSE FORMAT - MANDATORY
 Your final response MUST be EXACTLY this JSON format with NO additional text before or after:
 {
-  "message": "Found X cars. {Brief description of top 5 cars}. 1. Make Model Year – $Price (ID:###) – Condition ...",
+  "message": "Found X cars. {brief description of top 5 cars}. 1. Make Model Year – $Price (ID:###) – Condition ...",
   "car_ids": [list_of_all_matching_car_ids]
 }
 
@@ -1080,7 +1080,7 @@ VIOLATION WARNING: Any response that is not pure JSON format will be rejected. D
 
 # Initialize the model with the stable GA version
 llm = ChatGoogleGenerativeAI(
-    model="gemini-1.5-flash", 
+    model="gemini-2.5-flash", 
     api_key=os.getenv("GEMINI_API_KEY"),
     temperature=0
 )
