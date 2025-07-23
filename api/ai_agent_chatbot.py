@@ -1040,11 +1040,13 @@ AVAILABLE TOOLS (STREAMLINED)
 
 SIMPLIFIED DECISION GUIDE
 1. Most searches → search_cars (handles make, model, price, year, category, keywords, etc.)
-2. "Similar to car ID" → get_similar_cars
-3. Lifestyle/vague requests ("family car", "student car") → search_web_for_car_info first, then search_cars
+2. "Similar to car ID" → get_similar_cars  
+3. Lifestyle/vague requests ("family car", "student car") → try search_cars FIRST with category mapping (family→SUV, sport→Sports), only use search_web_for_car_info if search_cars fails
 4. Recent/popular cars → get_recently_added_cars / get_popular_cars
 5. Market analysis → get_market_insights
 6. Feature-specific → get_cars_by_features
+
+IMPORTANT: For performance and reliability, prefer direct database searches over web searches. Use category synonyms: family car→SUV, sports car→Sports, luxury→Sedan.
 
 KEY IMPROVEMENTS
 • search_cars handles: structured filters, text search, budget ranges, category synonyms
@@ -1428,29 +1430,51 @@ def chat_with_bot(user_input: str, conversation_history: list = None) -> str:
 
 def fallback_car_search(user_input: str) -> str:
     """
-    Fallback function that directly searches the database without using the LLM.
+    Enhanced fallback function that directly searches the database without using the LLM.
     Used when the AI agent is experiencing issues.
     """
     try:
+        print(f"🚨 Fallback search activated for: {user_input}")
+        
         # Simple keyword-based search for common car-related terms
         user_lower = user_input.lower()
         
         # Try to extract basic search criteria
         search_params = {}
         
-        # Check for family car keywords (using correct database categories)
-        if any(word in user_lower for word in ["family", "families"]):
+        # Enhanced keyword detection for family cars
+        if any(word in user_lower for word in ["family", "families", "family car", "family vehicle"]):
             search_params["category"] = "SUV"
+            print("🔍 Detected family car request, searching SUVs")
         elif any(word in user_lower for word in ["sport", "sports", "sporty", "fast", "performance"]):
             search_params["category"] = "Sports"
-        elif any(word in user_lower for word in ["luxury", "premium"]):
+            print("🔍 Detected sports car request")
+        elif any(word in user_lower for word in ["luxury", "premium", "elegant"]):
             search_params["category"] = "Sedan"
+            print("🔍 Detected luxury car request, searching Sedans")
+        elif any(word in user_lower for word in ["suv", "crossover", "4x4", "awd"]):
+            search_params["category"] = "SUV"
+            print("🔍 Detected SUV request")
+        elif any(word in user_lower for word in ["sedan"]):
+            search_params["category"] = "Sedan"
+            print("🔍 Detected sedan request")
+        else:
+            # Default to showing all cars if no specific category is detected
+            print("🔍 No specific category detected, showing all cars")
         
         # Check for budget mentions
         if "budget" in user_lower or "cheap" in user_lower or "affordable" in user_lower:
             search_params["price_max"] = 25000
+            print("💰 Budget constraint detected: under $25,000")
         elif "expensive" in user_lower or "high-end" in user_lower:
             search_params["price_min"] = 50000
+            print("💰 High-end constraint detected: over $50,000")
+        
+        # Sort by price ascending to show most affordable first
+        search_params["sort_by"] = "price"
+        search_params["ascending"] = True
+        
+        print(f"🔍 Search parameters: {search_params}")
         
         # Perform a basic database search using the unified search_cars function
         result = search_cars.invoke(search_params)
@@ -1465,8 +1489,16 @@ def fallback_car_search(user_input: str) -> str:
             if not all_car_ids:
                 all_car_ids = [car.get("id") for car in cars_for_display if car.get("id")]
             
+            # Create a more user-friendly message based on the search type
+            if "family" in user_lower:
+                message_prefix = f"Found {total_count} family-friendly SUVs. Here are the top {len(cars_for_display)} options:"
+            elif search_params.get("category") == "Sports":
+                message_prefix = f"Found {total_count} sports cars. Here are the top {len(cars_for_display)} options:"
+            else:
+                message_prefix = f"Found {total_count} cars that might interest you. Here are the top {len(cars_for_display)}:"
+            
             response = {
-                "message": f"Found {total_count} cars that might interest you. Here are the top {len(cars_for_display)}:",
+                "message": message_prefix,
                 "car_ids": all_car_ids  # Use ALL matching IDs for frontend
             }
             
@@ -1479,21 +1511,24 @@ def fallback_car_search(user_input: str) -> str:
                 else:
                     price_str = f"${price}"
                 
-                car_line = f"{i}. {car.get('make', 'Unknown')} {car.get('model', 'Unknown')} {car.get('year', 'N/A')} - {price_str} (ID: {car.get('id', 'N/A')}) - {car.get('condition', 'Used')}"
+                car_line = f" {i}. {car.get('make', 'Unknown')} {car.get('model', 'Unknown')} {car.get('year', 'N/A')} – {price_str} (ID:{car.get('id', 'N/A')}) – {car.get('condition', 'Used')}, {car.get('color', 'Unknown')}"
                 car_list.append(car_line)
             
             response["message"] += " " + " ".join(car_list)
-            response["message"] += " Note: I'm currently experiencing some technical issues, so this is a simplified search. Please try again later for more detailed assistance."
             
+            print(f"✅ Fallback search successful: {total_count} cars found")
             return json.dumps(response)
         else:
+            print("❌ Fallback search failed: no results from database")
             return json.dumps({
-                "message": "I'm currently experiencing technical difficulties and couldn't find any cars matching your criteria. Please try again later.",
+                "message": "I couldn't find any cars matching your criteria at the moment. Please try with different search terms or contact support.",
                 "car_ids": []
             })
             
     except Exception as e:
-        print(f"Fallback search error: {e}")
+        print(f"❌ Fallback search error: {e}")
+        import traceback
+        print(f"📍 Traceback: {traceback.format_exc()}")
         return json.dumps({
             "message": "I'm currently experiencing technical difficulties. Please try again later or contact support if the problem persists.",
             "car_ids": []
