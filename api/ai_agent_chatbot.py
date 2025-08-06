@@ -43,6 +43,7 @@ def get_cars_data_eq(
     drivetrain: str = None,
     color: str = None,
     category: str = None,
+    type: str = None,
     source: str = None,
     status: str = "available",
     order_by: str = "price",
@@ -66,6 +67,7 @@ def get_cars_data_eq(
         drivetrain: Drivetrain type (e.g., "FWD", "RWD", "AWD", "4WD", "4x4")
         color: Car color - uses fuzzy matching
         category: Vehicle category (e.g., "sedan", "suv", "coupe", "hatchback")
+        type: Car type/fuel type (e.g., "Electric", "Hybrid", "Gasoline", "Diesel")
         source: Source country (e.g., "GCC", "US", "Canada", "Europe")
         status: Car status (default: "available")
         order_by: Field to sort by (default: "price")
@@ -125,11 +127,28 @@ def get_cars_data_eq(
                 "sedan": "Sedan",
                 "suv": "SUV",
                 "crossover": "SUV",
-                "family car": "SUV",  # treat family car as SUV default
+                # Removed electric/hybrid from category - they go in type field
             }
             category_mapped = cat_synonyms.get(category.lower(), category)
             category = category_mapped
             query = query.eq("category", category)
+        if type:
+            # Map electric/hybrid synonyms to type field
+            type_synonyms = {
+                "electric": "Electric",
+                "electric car": "Electric",
+                "electric vehicle": "Electric",
+                "ev": "Electric",
+                "hybrid": "Hybrid",
+                "hybrid car": "Hybrid",
+                "gasoline": "Gasoline",
+                "gas": "Gasoline",
+                "petrol": "Gasoline",
+                "diesel": "Diesel",
+            }
+            type_mapped = type_synonyms.get(type.lower(), type)
+            type = type_mapped
+            query = query.eq("type", type)
         if source:
             query = query.eq("source", source)
         if status:
@@ -183,6 +202,7 @@ def search_cars_text(
     price_max: float = None,
     condition: str = None,
     category: str = None,
+    type: str = None,
     year_min: int = None,
     year_max: int = None,
     status: str = "available"
@@ -198,6 +218,7 @@ def search_cars_text(
         price_max: Maximum price filter
         condition: Car condition filter
         category: Vehicle category filter
+        type: Car type/fuel type filter
         year_min: Minimum year filter
         year_max: Maximum year filter
         status: Car status (default: "available")
@@ -230,11 +251,28 @@ def search_cars_text(
                 "sedan": "Sedan",
                 "suv": "SUV",
                 "crossover": "SUV",
-                "family car": "SUV",  # treat family car as SUV default
+                # Removed electric/hybrid from category - they go in type field
             }
             category_mapped = cat_synonyms.get(category.lower(), category)
             category = category_mapped
             query = query.eq("category", category)
+        if type:
+            # Map electric/hybrid synonyms to type field
+            type_synonyms = {
+                "electric": "Electric",
+                "electric car": "Electric",
+                "electric vehicle": "Electric",
+                "ev": "Electric",
+                "hybrid": "Hybrid",
+                "hybrid car": "Hybrid",
+                "gasoline": "Gasoline",
+                "gas": "Gasoline",
+                "petrol": "Gasoline",
+                "diesel": "Diesel",
+            }
+            type_mapped = type_synonyms.get(type.lower(), type)
+            type = type_mapped
+            query = query.eq("type", type)
         if year_min:
             query = query.gte("year", year_min)
         if year_max:
@@ -937,12 +975,6 @@ def search_web_for_car_info(
         if not results:
             # Fallback: provide common car category mappings (using correct database categories)
             car_type_mappings = {
-                "family car": ["SUV", "Sedan"],
-                "family of 5": ["SUV"],  # 5+ people need larger vehicles
-                "large family": ["SUV"],  # Large families need SUVs
-                "big family": ["SUV"],
-                "7 seater": ["SUV"],
-                "8 seater": ["SUV"],
                 "college student": ["Hatchback", "Sedan"],  # Budget-friendly, efficient
                 "student": ["Hatchback", "Sedan"],
                 "first car": ["Hatchback", "Sedan"],  # Safe, affordable
@@ -966,31 +998,70 @@ def search_web_for_car_info(
                 "reliable car": ["Sedan", "SUV"],
                 "economical car": ["Hatchback", "Sedan"],
                 "safe car": ["SUV", "Sedan"],
-                "spacious car": ["SUV"]
+                "spacious car": ["SUV"],
+                # Electric/hybrid cars should use type field, not category
+            }
+            
+            # Separate mapping for type field (electric/hybrid)
+            car_type_fuel_mappings = {
+                "electric": "Electric",
+                "electric car": "Electric",
+                "electric vehicle": "Electric",
+                "ev": "Electric",
+                "hybrid": "Hybrid",
+                "hybrid car": "Hybrid",
+                "eco friendly": "Electric",
+                "environmentally friendly": "Electric",
+                "zero emission": "Electric",
+                "tesla": "Electric",  # Brand often associated with electric
+                "gas": "Gasoline",
+                "gasoline": "Gasoline",
+                "petrol": "Gasoline",
+                "diesel": "Diesel",
             }
             
             # Check if query matches any known patterns (more flexible matching)
             query_lower = query.lower()
             suggested_categories = []
+            suggested_type = None
             
+            # Check for category matches
             for car_type, categories in car_type_mappings.items():
                 # More flexible matching - check if any words from car_type are in query
                 car_type_words = car_type.split()
                 if any(word in query_lower for word in car_type_words):
                     suggested_categories.extend(categories)
             
-            # Remove duplicates and ensure we have some categories
-            if suggested_categories:
-                unique_categories = list(set(suggested_categories))
+            # Check for fuel type matches
+            for fuel_term, fuel_type in car_type_fuel_mappings.items():
+                fuel_words = fuel_term.split()
+                if any(word in query_lower for word in fuel_words):
+                    suggested_type = fuel_type
+                    break
+            
+            # Remove duplicates and ensure we have some suggestions
+            if suggested_categories or suggested_type:
+                unique_categories = list(set(suggested_categories)) if suggested_categories else []
+                result_content = f"Based on your search for '{query}', I recommend looking at"
+                
+                if suggested_type:
+                    result_content += f" {suggested_type} vehicles"
+                    if unique_categories:
+                        result_content += f" in these categories: {', '.join(unique_categories)}"
+                else:
+                    result_content += f" these vehicle categories: {', '.join(unique_categories)}"
+                
                 results.append({
                     "type": "category_suggestion",
-                    "content": f"Based on your search for '{query}', I recommend looking at these vehicle categories: {', '.join(unique_categories)}",
-                    "categories": unique_categories
+                    "content": result_content,
+                    "categories": unique_categories,
+                    "fuel_type": suggested_type
                 })
         
         # Extract car categories and types from the results
         extracted_insights = {
             "suggested_categories": [],
+            "suggested_types": [],
             "suggested_makes": [],
             "key_features": [],
             "price_insights": []
@@ -998,8 +1069,11 @@ def search_web_for_car_info(
         
         # First check if we have direct category suggestions from fallback
         for result in results:
-            if result.get("type") == "category_suggestion" and result.get("categories"):
-                extracted_insights["suggested_categories"].extend(result["categories"])
+            if result.get("type") == "category_suggestion":
+                if result.get("categories"):
+                    extracted_insights["suggested_categories"].extend(result["categories"])
+                if result.get("fuel_type"):
+                    extracted_insights["suggested_types"].append(result["fuel_type"])
         
         # Also analyze text content for car-related keywords
         all_text = " ".join([r.get("content", "") for r in results]).lower()
@@ -1020,23 +1094,45 @@ def search_web_for_car_info(
             "crossover": "SUV",  # Map crossover to SUV as closest match
             "luxury": "Sedan",  # Map luxury to Sedan as default
             "wagon": "Hatchback",  # Map wagon to Hatchback as closest match
-            "classic": "Classic"  # Add classic category
+            "classic": "Classic",  # Add classic category
+        }
+        
+        # Separate mapping for type field (fuel types)
+        type_mapping = {
+            "electric": "Electric",  # Add electric vehicles
+            "electric car": "Electric",
+            "electric vehicle": "Electric",
+            "ev": "Electric",
+            "hybrid": "Hybrid",  # Add hybrid vehicles
+            "hybrid car": "Hybrid",
+            "tesla": "Electric",  # Tesla is typically electric
+            "eco": "Electric",  # Eco-friendly usually refers to electric
+            "green": "Electric",  # Green cars usually electric
+            "gas": "Gasoline",
+            "gasoline": "Gasoline",
+            "petrol": "Gasoline",
+            "diesel": "Diesel"
         }
         
         found_categories = set()
+        found_types = set()
         for search_term, db_category in category_mapping.items():
             if search_term in all_text:
                 found_categories.add(db_category)
         
+        for search_term, db_type in type_mapping.items():
+            if search_term in all_text:
+                found_types.add(db_type)
+        
         # Combine direct suggestions and text analysis
         extracted_insights["suggested_categories"].extend(list(found_categories))
+        extracted_insights["suggested_types"].extend(list(found_types))
         
-        # Remove duplicates while preserving order and prioritise SUV if present
+        # Remove duplicates while preserving order
         original_cats = extracted_insights["suggested_categories"]
         extracted_insights["suggested_categories"] = list(dict.fromkeys(original_cats))  # dedupe keep order
-        if "SUV" in extracted_insights["suggested_categories"]:
-            extracted_insights["suggested_categories"].remove("SUV")
-            extracted_insights["suggested_categories"].insert(0, "SUV")
+        original_types = extracted_insights["suggested_types"]
+        extracted_insights["suggested_types"] = list(dict.fromkeys(original_types))  # dedupe keep order
         
         # (deduplication already handled above while preserving order)
         
@@ -1057,11 +1153,6 @@ def search_web_for_car_info(
     except requests.RequestException as e:
         # Fallback response with common car knowledge (using correct database categories)
         fallback_insights = {
-            "family car": {
-                "categories": ["SUV", "Sedan"],  # Use database category names
-                "features": ["safety", "space", "reliability"],
-                "description": "Family cars prioritize safety, space, and reliability"
-            },
             "sport": {  # Handle both "sport" and "sports" variations
                 "categories": ["Sports", "Coupe", "Convertible"],  # Use database category names
                 "features": ["performance", "speed", "handling"],
@@ -1081,6 +1172,24 @@ def search_web_for_car_info(
                 "categories": ["Sedan", "Hatchback"],  # Use database category names
                 "features": ["mpg", "hybrid", "economy"],
                 "description": "Fuel efficient cars prioritize low fuel consumption"
+            },
+            "electric": {
+                "categories": [],  # Electric is a type, not category
+                "types": ["Electric"],
+                "features": ["zero emissions", "instant torque", "quiet operation"],
+                "description": "Electric cars offer environmental benefits and modern technology"
+            },
+            "electric car": {
+                "categories": [],  # Electric is a type, not category
+                "types": ["Electric"],
+                "features": ["zero emissions", "instant torque", "quiet operation"],
+                "description": "Electric cars offer environmental benefits and modern technology"
+            },
+            "hybrid": {
+                "categories": [],  # Hybrid is a type, not category
+                "types": ["Hybrid"],
+                "features": ["fuel efficiency", "low emissions", "dual power"],
+                "description": "Hybrid cars combine electric and gas power for efficiency"
             }
         }
         
@@ -1098,7 +1207,8 @@ def search_web_for_car_info(
                 "query": query,
                 "fallback_used": True,
                 "extracted_insights": {
-                    "suggested_categories": matched_insight["categories"],
+                    "suggested_categories": matched_insight.get("categories", []),
+                    "suggested_types": matched_insight.get("types", []),
                     "key_features": matched_insight["features"],
                     "description": matched_insight["description"]
                 },
@@ -1153,11 +1263,12 @@ SIMPLIFIED DECISION GUIDE
 1. Exact model searches → get_cars_data_eq (e.g., "Mercedes C300", "BMW X5")
 2. Model FAMILY searches → get_cars_data_eq with simplified model terms (e.g., "Mercedes C series" → make="Mercedes" + model="C")
 3. "Similar to car ID" → get_similar_cars
-4. Lifestyle/vague requests ("family car", "student car") → search_web_for_car_info first, then ALWAYS get_cars_data_eq with suggested categories
-5. Recent/popular cars → get_recently_added_cars / get_popular_cars
-6. Market analysis → get_market_insights
-7. Feature-specific → get_cars_by_features
-8. CAR COMPARISONS ("X vs Y", "which is better X or Y") → ALWAYS do ALL of these steps:
+4. Lifestyle/vague requests ("student car", "business car") → search_web_for_car_info first, then ALWAYS get_cars_data_eq with suggested categories
+5. Electric/Hybrid requests → get_cars_data_eq with type="Electric" or "Hybrid" (NOT category!)
+6. Recent/popular cars → get_recently_added_cars / get_popular_cars
+7. Market analysis → get_market_insights
+8. Feature-specific → get_cars_by_features
+9. CAR COMPARISONS ("X vs Y", "which is better X or Y") → ALWAYS do ALL of these steps:
    a) search_web_for_car_info for each car model separately (e.g., "Mercedes C300 review", "Audi A7 review")
    b) get_cars_data_eq to find available inventory for each make/model
    c) Provide detailed comparison with pros/cons, available cars, and recommendation based on user context
@@ -1173,8 +1284,9 @@ MODEL FAMILY MAPPING RULES
 KEY IMPROVEMENTS
 • get_cars_data_eq handles: structured filters, text search, budget ranges, category synonyms
 • No more confusion between similar tools - ONE main search tool
-• Automatic category mapping (family car → SUV, sports car → Sports, etc.)
+• Automatic category mapping (sports car → Sports, etc.) and type mapping (electric → Electric type field, hybrid → Hybrid type field)
 • Better model family mapping (C-Class → C300/C350/etc. search)
+• Electric and hybrid vehicle support using correct 'type' field (not category)
 • Better performance with unified queries
 
 WORKFLOW
@@ -1197,7 +1309,7 @@ RESPONSE FORMAT (strict)
   "car_ids": [list_of_matching_car_ids]
 }
 • No markdown or code fences.
-• When you find many cars (25+), provide educational guidance about what makes a good car for their needs. For family cars, explain safety features, space requirements, reliability factors. Then ask targeted questions about their priorities (budget, family size, must-have features) .
+• When you find many cars (25+), provide educational guidance about what makes a good car for their specific needs. Ask targeted questions about their priorities (budget, family size, must-have features, fuel type preference) .
 • When showing cars, only mention top 3-5 cars with brief details (make, model, year, price).
 • Include relevant car IDs in "car_ids" array (if there are more than 15 include the first 15). Never mention IDs or inventory counts in the message text.
 • If no cars match, apologize and suggest adjusting the search parameters.
@@ -1210,7 +1322,7 @@ AGE-SPECIFIC RECOMMENDATIONS
 
 RESULT HANDLING
 • If you get 15+ cars from search tools, provide educational guidance instead of listing everything.
-• Explain what makes a good family car and guide them through key considerations.
+• Explain what makes a good car for their specific needs and guide them through key considerations.
 • Ask targeted questions to narrow down their specific needs.
 • Don't mention exact numbers of cars found or reference inventory counts.
 • Only show specific cars when results are focused (under 15 cars) or user provides constraints.
@@ -1369,7 +1481,7 @@ def validate_and_fix_response(response_content: str) -> str:
         print(f"JSON validation error: {e}")
         # If JSON parsing fails, create a fallback response
         return json.dumps({
-            "message": "I found several family cars for you. To help narrow down the options, could you share your budget range or any specific preferences (brand, size, features)?",
+            "message": "I'd be happy to help you find the right car. Could you share more details about what you're looking for? For example, your budget range, preferred size, or any specific features you need?",
             "car_ids": []
         })
 
@@ -1492,11 +1604,8 @@ def fallback_car_search(user_input: str) -> str:
         # Try to extract basic search criteria
         search_params = {}
         
-        # Enhanced keyword detection for family cars
-        if any(word in user_lower for word in ["family", "families", "family car", "family vehicle"]):
-            search_params["category"] = "SUV"
-            print("🔍 Detected family car request, searching SUVs")
-        elif any(word in user_lower for word in ["sport", "sports", "sporty", "fast", "performance"]):
+        # Enhanced keyword detection
+        if any(word in user_lower for word in ["sport", "sports", "sporty", "fast", "performance"]):
             search_params["category"] = "Sports"
             print("🔍 Detected sports car request")
         elif any(word in user_lower for word in ["luxury", "premium", "elegant"]):
@@ -1508,6 +1617,12 @@ def fallback_car_search(user_input: str) -> str:
         elif any(word in user_lower for word in ["sedan"]):
             search_params["category"] = "Sedan"
             print("🔍 Detected sedan request")
+        elif any(word in user_lower for word in ["electric", "ev", "tesla", "electric car", "electric vehicle"]):
+            search_params["type"] = "Electric"
+            print("🔍 Detected electric car request")
+        elif any(word in user_lower for word in ["hybrid", "hybrid car", "prius"]):
+            search_params["type"] = "Hybrid"
+            print("🔍 Detected hybrid car request")
         else:
             # Default to showing all cars if no specific category is detected
             print("🔍 No specific category detected, showing all cars")
@@ -1535,19 +1650,13 @@ def fallback_car_search(user_input: str) -> str:
             cars_to_show = all_cars[:5]  # Show details for top 5 only
             total_count = result_data.get("total_count", 0)
             
-            # Fallback: if all_car_ids is missing, extract from data
-            if not all_car_ids:
-                all_car_ids = [car.get("id") for car in cars_for_display if car.get("id")]
+            # Create list of all car IDs for frontend
+            all_car_ids = [car.get("id") for car in all_cars if car.get("id")]
             
             response = {
-                "message": f"Found {total_count} cars that might interest you. Here are the top {len(cars_for_display)}:",
+                "message": f"Found {total_count} cars that might interest you. Here are the top {len(cars_to_show)}:",
                 "car_ids": all_car_ids  # Use ALL matching IDs for frontend
             }
-            
-            # Add ALL car IDs to the array (for frontend)
-            for car in all_cars:
-                if car.get("id"):
-                    response["car_ids"].append(car.get("id"))
             
             # Format top cars for display in message
             car_list = []
