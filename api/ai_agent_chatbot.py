@@ -1336,7 +1336,7 @@ STYLE
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash", 
     api_key=os.getenv("GEMINI_API_KEY"),
-    temperature=0
+    temperature=0.5
 )
 llm = llm.bind_tools(tools)
 
