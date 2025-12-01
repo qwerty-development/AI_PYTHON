@@ -1825,9 +1825,10 @@ def fallback_car_search(user_input: str) -> str:
 def start_interactive_chat():
     """Start an interactive chat session for local testing."""
     print("🚗 Welcome to Enhanced Car Search Assistant!")
-    print("Type 'quit' to exit or enter your message.")
-    print("Note: Each message is processed independently (stateless mode)")
+    print("Type 'quit' to exit, 'clear' to start a new conversation.")
     print("-" * 50)
+    
+    conversation_history = []
     
     while True:
         user_input = input("\nYou: ").strip()
@@ -1835,13 +1836,22 @@ def start_interactive_chat():
         if user_input.lower() == 'quit':
             print("Thanks for using the Car Search Assistant! Goodbye! 👋")
             break
+        elif user_input.lower() == 'clear':
+            conversation_history = []
+            print("🔄 Conversation cleared. Starting fresh!")
+            continue
         elif not user_input:
             print("Please enter a message.")
             continue
         
         print("Bot: ", end="", flush=True)
-        response = chat_with_bot(user_input)
+        response = chat_with_bot(user_input, conversation_history)
         print(response)
+        
+        # Update conversation history for next turn
+        conversation_history.append({"role": "user", "content": user_input})
+        conversation_history.append({"role": "assistant", "content": response})
+        print(f"\n📚 History: {len(conversation_history)} messages")
 
 # Example usage for testing
 if __name__ == "__main__":
